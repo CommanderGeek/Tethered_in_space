@@ -1,5 +1,5 @@
-# Baut das Spiel bei jedem Push auf main/master und veröffentlicht es auf GitHub Pages.
-# Einmalig nötig: Repo -> Settings -> Pages -> Source: "GitHub Actions"
+# Builds the game on every push to main/master and publishes it to GitHub Pages.
+# One-time setup: repo -> Settings -> Pages -> Source: "GitHub Actions"
 name: Deploy to GitHub Pages
 
 on:

@@ -1,9 +1,9 @@
-// Touch-Steuerung fürs Handy: schwebender Joystick auf der linken Bildschirmhälfte,
-// Anker-Knopf rechts. Läuft komplett im DOM (scharf und günstig zu rendern).
+// Touch controls for phones: floating joystick on the left half of the screen,
+// anchor button on the right. Lives entirely in the DOM (crisp and cheap to render).
 
 import type { PlayerInput } from '../sim/sim';
 
-const RADIUS = 60; // maximaler Ausschlag des Knüppels in px
+const RADIUS = 60; // max stick travel in px
 
 class TouchControls {
   private root?: HTMLElement;
@@ -14,7 +14,7 @@ class TouchControls {
   private anchorIds = new Set<number>();
   private origin = { x: 0, y: 0 };
   private vec = { x: 0, y: 0 };
-  /** true, sobald der Touch-Modus einmal benutzt wurde */
+  /** true once touch controls have been used */
   used = false;
 
   mount(root: HTMLElement) {
@@ -64,7 +64,7 @@ class TouchControls {
     btn.addEventListener('pointerup', release);
     btn.addEventListener('pointercancel', release);
 
-    // kein Kontextmenü / Text-Markieren beim langen Drücken
+    // no context menu / text selection on long press
     root.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
@@ -73,7 +73,7 @@ class TouchControls {
     let dy = y - this.origin.y;
     const d = Math.hypot(dx, dy);
     if (d > RADIUS) {
-      // Basis wandert mit, wenn man weit zieht – fühlt sich natürlicher an
+      // the base follows when you drag far — feels more natural
       this.origin.x += (dx / d) * (d - RADIUS);
       this.origin.y += (dy / d) * (d - RADIUS);
       this.base!.style.transform = `translate(${this.origin.x}px, ${this.origin.y}px)`;
@@ -81,7 +81,7 @@ class TouchControls {
       dy = (dy / d) * RADIUS;
     }
     this.knob!.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-    // kleine Totzone, danach linear
+    // small dead zone, linear after that
     const mag = Math.min(1, Math.hypot(dx, dy) / RADIUS);
     const strength = mag < 0.15 ? 0 : (mag - 0.15) / 0.85;
     const ang = Math.atan2(dy, dx);

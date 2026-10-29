@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
@@ -17,89 +17,108 @@
     <div id="game"></div>
 
     <div id="overlay" class="overlay">
-      <!-- Hauptmenü -->
+      <!-- Main menu -->
       <section class="panel" data-screen="main">
         <h1 class="logo">TETHERED</h1>
-        <p class="tagline">Zwei Schiffe. Ein Seil. Alles dazwischen wird zerschnitten.</p>
+        <p class="tagline">Two ships. One tether. Everything in between gets sliced.</p>
         <div class="buttons">
-          <button data-action="host" class="primary">Raum erstellen</button>
-          <button data-action="show-join">Raum beitreten</button>
-          <button data-action="local" class="ghost desktop-only">Lokal zu zweit (eine Tastatur)</button>
+          <button data-action="host" class="primary">Create room</button>
+          <button data-action="show-join">Join room</button>
+          <button data-action="local" class="ghost desktop-only">Local co-op (one keyboard)</button>
+          <button data-action="show-scores" class="ghost">Highscores</button>
         </div>
         <details class="howto">
-          <summary>Wie spielt man?</summary>
+          <summary>How to play</summary>
           <ul>
-            <li><b>Fliegen:</b> WASD oder Pfeiltasten <span class="touch-only">(Handy: linke Bildschirmhälfte wischen)</span></li>
-            <li><b>Ankern:</b> Leertaste/Shift <span class="touch-only">(Handy: ⚓-Knopf rechts)</span>. Du wirst schwer und bremst, dein Partner schwingt um dich herum.</li>
-            <li><b>Schneiden:</b> Zieht das Seil <i>schnell</i> durch Asteroiden. Langsam prallen sie nur ab.</li>
-            <li><b>Slingshot:</b> Fliegt schnell dicht an einem Planeten vorbei (goldener Ring). Dann bekommt ihr kurz mehr Tempo und doppelte Punkte.</li>
-            <li><b>Planeten</b> ziehen euch und die Asteroiden an. Ein harter Aufprall kostet Hülle.</li>
-            <li><b>Achtung:</b> Zu viel Zug, dann reißt das Seil. Fliegt wieder nah zusammen, um es neu zu verbinden.</li>
-            <li>Schnelle Schnitte hintereinander geben Kombo-Punkte.</li>
+            <li><b>Fly:</b> WASD or arrow keys <span class="touch-only">(phone: drag on the left half of the screen)</span></li>
+            <li><b>Anchor:</b> Space/Shift <span class="touch-only">(phone: ⚓ button on the right)</span>. You get heavy and brake hard, so your partner swings around you.</li>
+            <li><b>Slice:</b> Sweep the tether <i>fast</i> through asteroids. Too slow and they just bounce off.</li>
+            <li><b>Slingshot:</b> Fly fast close past a planet (golden ring) for a short speed boost and double points.</li>
+            <li><b>Planets</b> pull in you and the asteroids. Hard impacts cost hull.</li>
+            <li><b>Drones</b> dodge the tether and shoot — the tether blocks their shots. <b>Jellyfish</b> split when sliced and sting.</li>
+            <li><b>Leviathan</b> (every 5 waves) can't be sliced: squeeze it with the taut tether and orbit it together to wrap it up.</li>
+            <li><b>Careful:</b> too much strain snaps the tether. Fly close together again to reconnect.</li>
+            <li>Quick slices in a row build up a combo.</li>
           </ul>
         </details>
       </section>
 
-      <!-- Host wartet -->
+      <!-- Host waiting -->
       <section class="panel" data-screen="hosting" hidden>
-        <h2>Raum erstellt</h2>
-        <p>Gib deinem Mitspieler diesen Code:</p>
+        <h2>Room created</h2>
+        <p>Give this code to the other player:</p>
         <div class="code" id="room-code">·····</div>
         <div class="buttons row">
-          <button data-action="copy-code">Code kopieren</button>
-          <button data-action="copy-link">Einladungslink kopieren</button>
+          <button data-action="copy-code">Copy code</button>
+          <button data-action="copy-link">Copy invite link</button>
         </div>
-        <p class="status"><span class="pulse"></span> Warte auf Mitspieler …</p>
-        <button data-action="back" class="ghost">Abbrechen</button>
+        <p class="status"><span class="pulse"></span> Waiting for the other player …</p>
+        <button data-action="back" class="ghost">Cancel</button>
       </section>
 
-      <!-- Beitreten -->
+      <!-- Join -->
       <section class="panel" data-screen="join" hidden>
-        <h2>Raum beitreten</h2>
+        <h2>Join room</h2>
         <form id="join-form">
           <input id="join-code" maxlength="5" autocomplete="off" spellcheck="false" placeholder="CODE" />
-          <button type="submit" class="primary">Verbinden</button>
+          <button type="submit" class="primary">Connect</button>
         </form>
-        <button data-action="back" class="ghost">Zurück</button>
+        <button data-action="back" class="ghost">Back</button>
       </section>
 
-      <!-- Laden / Fehler / Info -->
+      <!-- Loading / errors / info -->
       <section class="panel" data-screen="message" hidden>
         <h2 id="msg-title"></h2>
         <p id="msg-text"></p>
-        <button data-action="back" class="ghost" id="msg-back">Zum Menü</button>
+        <button data-action="back" class="ghost" id="msg-back">Back to menu</button>
       </section>
 
-      <!-- Game Over -->
+      <!-- Game over -->
       <section class="panel" data-screen="over" hidden>
-        <h2>Mission beendet</h2>
+        <h2>Mission over</h2>
         <div class="final-score" id="final-score">0</div>
         <p id="final-wave"></p>
+        <form id="score-form" hidden>
+          <p class="new-score">New highscore! Name your team:</p>
+          <div class="score-row">
+            <input id="team-name" maxlength="20" autocomplete="off" spellcheck="false" placeholder="Team name" />
+            <button type="submit">Save</button>
+          </div>
+        </form>
+        <p id="score-saved" class="new-score" hidden></p>
         <div class="buttons">
-          <button data-action="restart" class="primary">Nochmal</button>
-          <button data-action="leave" class="ghost">Zum Menü</button>
+          <button data-action="restart" class="primary">Play again</button>
+          <button data-action="leave" class="ghost">Back to menu</button>
         </div>
+      </section>
+
+      <!-- Highscores -->
+      <section class="panel" data-screen="scores" hidden>
+        <h2>Highscores</h2>
+        <ol id="score-list" class="score-list"></ol>
+        <p id="score-empty" hidden>No runs yet — go slice some asteroids!</p>
+        <button data-action="back" class="ghost">Back</button>
       </section>
     </div>
 
-    <!-- Touch-Steuerung (nur auf Handys im Spiel sichtbar) -->
+    <!-- Touch controls (only visible on phones during play) -->
     <div id="touch">
       <div class="stick-zone"></div>
       <div class="stick-base"><div class="stick-knob"></div></div>
-      <button class="anchor-btn" aria-label="Ankern">⚓</button>
+      <button class="anchor-btn" aria-label="Anchor">⚓</button>
     </div>
 
-    <!-- Hinweis: Handy drehen -->
+    <!-- Hint: rotate your phone -->
     <div id="rotate">
       <div class="rotate-icon">📱</div>
-      <p>Dreh dein Handy ins Querformat</p>
+      <p>Rotate your phone to landscape</p>
     </div>
 
     <div id="toolbar">
-      <button id="fullscreen" title="Vollbild">⛶</button>
-      <button id="quality" title="Grafikqualität">Grafik: Auto</button>
-      <button id="mute" title="Ton an/aus (M)">♪</button>
-      <button id="menu-btn" title="Zurück zum Menü (Esc)">Menü</button>
+      <button id="fullscreen" title="Fullscreen">⛶</button>
+      <button id="quality" title="Graphics quality">Graphics: Auto</button>
+      <button id="mute" title="Sound on/off (M)">♪</button>
+      <button id="menu-btn" title="Back to menu (Esc)">Menu</button>
     </div>
     <footer id="version"></footer>
 

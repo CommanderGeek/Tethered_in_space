@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import * as C from '../sim/constants';
 import { planetRadius, type PlayerInput, type SimEvent } from '../sim/sim';
+import { EntityRenderer } from '../render/entities';
 import type { ViewPlanet, ViewState } from '../sim/snapshot';
 import { Session } from '../session';
 import { sfx } from '../render/sfx';
@@ -11,7 +12,7 @@ import { touch } from '../input/touch';
 export const SHIP_COLORS = [0x3ef3ff, 0xff4fd8] as const;
 const BOOST_COLOR = 0xffc94a;
 const HOT_COLOR = 0xff4646;
-const SHIP_SCALE = 0.52; // Textur ~90px lang -> ~47px im Spiel
+const SHIP_SCALE = 0.52; // texture ~90px long -> ~47px in game
 const PLANET_ATMO_TINT = [0xffaa66, 0x88ccff, 0xff6633, 0x88ffaa];
 
 type KeyMap = {
@@ -21,6 +22,8 @@ type KeyMap = {
 
 export interface SceneHooks {
   onGameOver(score: number, wave: number): void;
+  /** a new round started (e.g. the other player pressed "Play again") */
+  onRestarted(): void;
   onDisconnect(): void;
 }
 
@@ -31,7 +34,7 @@ interface ShipGfx {
   shield: Phaser.GameObjects.Image;
 }
 
-/** Farbmischung ohne Objekt-Allokation (läuft viele Male pro Frame) */
+/** Colour mix without allocations (runs many times per frame) */
 const lerpColor = (a: number, b: number, t: number) => {
   t = t < 0 ? 0 : t > 1 ? 1 : t;
   const r = ((a >> 16) & 255) + ((((b >> 16) & 255) - ((a >> 16) & 255)) * t);
@@ -56,14 +59,14 @@ export class GameScene extends Phaser.Scene {
   private demo = true;
   private hooks?: SceneHooks;
 
-  // Ebenen (von hinten nach vorne)
+  // layers (back to front)
   private bg!: Phaser.GameObjects.Layer;
   private worldBack!: Phaser.GameObjects.Layer;
   private worldMid!: Phaser.GameObjects.Layer;
   private worldFront!: Phaser.GameObjects.Layer;
   private hud!: Phaser.GameObjects.Layer;
 
-  /** bewegte Sterne/Staub als einzelne kleine Sprites (statt bildschirmfüllender TileSprites) */
+  /** moving stars/dust as individual small sprites (instead of full-screen tile sprites) */
   private stars: { img: Phaser.GameObjects.Image; x: number; y: number }[] = [];
   private dust: { img: Phaser.GameObjects.Image; x: number; y: number }[] = [];
   private glints: Phaser.GameObjects.Image[] = [];
@@ -71,9 +74,14 @@ export class GameScene extends Phaser.Scene {
   private showFps = new URLSearchParams(location.search).has('debug');
   private prof: QualityProfile = quality.profile;
   private trailAcc = 0;
-  private gBack!: Phaser.GameObjects.Graphics; // Gravitationsfelder, Warnpfeile
-  private gTether!: Phaser.GameObjects.Graphics; // additiv
-  private gFront!: Phaser.GameObjects.Graphics; // Anker-Ringe, Markierungen
+  private gBack!: Phaser.GameObjects.Graphics; // warning arrows
+  private gTether!: Phaser.GameObjects.Graphics; // additive
+  private gFront!: Phaser.GameObjects.Graphics; // anchor rings, markers
+  private gFx!: Phaser.GameObjects.Graphics; // additive: tentacles, wrap ring, telegraphs
+  private entities!: EntityRenderer;
+  private bossBar!: Phaser.GameObjects.Graphics;
+  private bossLabel!: Phaser.GameObjects.Text;
+  private bossKey = '';
 
   private shipGfx: ShipGfx[] = [];
   private asteroidImgs = new Map<number, Phaser.GameObjects.Image>();
@@ -114,6 +122,15 @@ export class GameScene extends Phaser.Scene {
   create() {
     createTextures(this, SHIP_COLORS);
 
+    // The canvas is transparent (background is CSS). Phaser's default ADD blend uses
+    // DST_ALPHA, which produces invalid premultiplied pixels over transparent areas
+    // (dark boxes around glows in some browsers). Plain ONE/ONE stays valid.
+    if (this.renderer instanceof Phaser.Renderer.WebGL.WebGLRenderer) {
+      const gl = this.renderer.gl;
+      // (Phaser types say Function, but the renderer expects the GL factor array)
+      this.renderer.updateBlendMode(Phaser.BlendModes.ADD, [gl.ONE, gl.ONE, gl.ONE, gl.ONE] as unknown as Function, gl.FUNC_ADD as unknown as Function);
+    }
+
     this.bg = this.add.layer();
     this.worldBack = this.add.layer();
     this.worldMid = this.add.layer();
@@ -130,13 +147,15 @@ export class GameScene extends Phaser.Scene {
     this.gBack = this.add.graphics();
     this.gTether = this.add.graphics().setBlendMode(Phaser.BlendModes.ADD);
     this.gFront = this.add.graphics();
+    this.gFx = this.add.graphics().setBlendMode(Phaser.BlendModes.ADD);
 
     this.makeParticles();
     this.makeShips();
 
-    // Reihenfolge: Planeten & Felder hinten, Asteroiden, Spuren, Seil, Schiffe, Funken
+    // order: planets & fields at the back, asteroids/enemies, trails, tether, ships, sparks
     this.worldBack.add([this.gBack]);
-    this.worldMid.add([...this.trails, this.boostTrail]);
+    this.worldMid.add([this.gFx, ...this.trails, this.boostTrail]);
+    this.entities = new EntityRenderer(this, this.worldMid, this.gFx);
     this.worldFront.add([this.gTether]);
     for (const s of this.shipGfx) this.worldFront.add([s.glow, s.flame, s.body, s.shield]);
     this.worldFront.add([this.gFront, this.debris, this.embers, this.sparks]);
@@ -146,16 +165,16 @@ export class GameScene extends Phaser.Scene {
     this.startDemo();
   }
 
-  /** Effekte je nach Qualitätsstufe an-/ausschalten */
+  /** Turn effects on/off depending on the quality level */
   private applyQuality(p: QualityProfile) {
     this.prof = p;
     const cam = this.cameras.main;
     if (this.renderer.type === Phaser.WEBGL) {
       cam.postFX.clear();
-      // Bloom ist der mit Abstand teuerste Effekt (mehrere Weichzeichner-Durchgänge übers ganze Bild)
+      // bloom is by far the most expensive effect (several blur passes over the whole image)
       if (p.bloom) cam.postFX.addBloom(0xffffff, 1, 1, 1, 1.1, 2);
     }
-    // Vignette per CSS (kostet keinen Shader-Durchgang)
+    // vignette via CSS (no shader pass)
     document.body.classList.toggle('vignette', p.vignette);
     for (const s of this.stars) s.img.setVisible(p.parallaxStars);
     for (const d of this.dust) d.img.setVisible(p.extraBackground);
@@ -167,8 +186,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private makeBackground() {
-    // Nebel + feste Sterne + Rand liegen als CSS-Hintergrund hinter dem (transparenten) Canvas.
-    // Der Browser-Compositor zeichnet das praktisch umsonst – spart ein bildschirmfüllendes Bild pro Frame.
+    // Nebula + static stars + border live as a CSS background behind the (transparent) canvas.
+    // The browser's compositor draws that almost for free — saves a full-screen image per frame.
     const neb = this.textures.get('nebula').getSourceImage() as HTMLCanvasElement;
     neb.toBlob((blob) => {
       if (!blob) return;
@@ -185,7 +204,7 @@ export class GameScene extends Phaser.Scene {
       this.bg.add(img);
     }
 
-    // funkelnde Sterne
+    // twinkling stars
     for (let i = 0; i < 22; i++) {
       const s = this.add.image(Math.random() * C.WORLD_W, Math.random() * C.WORLD_H, 'glint')
         .setBlendMode(Phaser.BlendModes.ADD)
@@ -200,15 +219,14 @@ export class GameScene extends Phaser.Scene {
       });
     }
 
-    // Arena-Rand: weicher Energiezaun
-
+    // foreground dust
     for (let i = 0; i < 16; i++) {
       const img = this.add.image(0, 0, 'dot').setScale(0.25 + Math.random() * 0.35).setTint(0xb4c8ff).setAlpha(0.18);
       this.dust.push({ img, x: Math.random() * C.WORLD_W, y: Math.random() * C.WORLD_H });
       this.bg.add(img);
     }
 
-    // gelegentliche Sternschnuppen
+    // occasional shooting stars
     this.time.addEvent({ delay: 3500, loop: true, callback: () => { if (this.prof.extraBackground && Math.random() < 0.55) this.shootingStar(); } });
   }
 
@@ -266,8 +284,8 @@ export class GameScene extends Phaser.Scene {
     const font = 'Orbitron, system-ui, sans-serif';
     const label = { fontFamily: font, fontSize: '12px', color: '#7f89c4' };
     this.hullBar = this.add.graphics();
-    this.hullLabel = this.add.text(40, 26, 'HÜLLE', label).setLetterSpacing(3);
-    this.scoreLabel = this.add.text(C.WORLD_W - 40, 26, 'PUNKTE', label).setOrigin(1, 0).setLetterSpacing(3);
+    this.hullLabel = this.add.text(40, 26, 'HULL', label).setLetterSpacing(3);
+    this.scoreLabel = this.add.text(C.WORLD_W - 40, 26, 'SCORE', label).setOrigin(1, 0).setLetterSpacing(3);
     this.scoreText = this.add.text(C.WORLD_W - 40, 42, '0', { fontFamily: font, fontSize: '34px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(1, 0);
     this.comboText = this.add.text(C.WORLD_W - 40, 84, '', { fontFamily: font, fontSize: '20px', color: '#ffd166', fontStyle: 'bold' }).setOrigin(1, 0);
     this.waveText = this.add.text(C.WORLD_W / 2, 30, '', { fontFamily: font, fontSize: '18px', color: '#9fb3ff' }).setOrigin(0.5, 0).setLetterSpacing(6);
@@ -278,7 +296,10 @@ export class GameScene extends Phaser.Scene {
     this.hint = this.add.text(40, C.WORLD_H - 36, '', { fontFamily: font, fontSize: '14px', color: '#7f89c4' }).setOrigin(0, 1);
     this.netText = this.add.text(C.WORLD_W - 40, C.WORLD_H - 36, '', { fontFamily: font, fontSize: '13px', color: '#5d6596' }).setOrigin(1, 1);
     this.fpsText = this.add.text(C.WORLD_W / 2, C.WORLD_H - 36, '', { fontFamily: 'monospace', fontSize: '14px', color: '#9fffb0' }).setOrigin(0.5, 1);
-    this.hud.add(this.fpsText);
+    this.bossBar = this.add.graphics();
+    this.bossLabel = this.add.text(C.WORLD_W / 2, 58, 'LEVIATHAN', { fontFamily: font, fontSize: '13px', color: '#9ff7ff' })
+      .setOrigin(0.5, 0).setLetterSpacing(6).setVisible(false);
+    this.hud.add([this.fpsText, this.bossBar, this.bossLabel]);
     this.hud.add([this.hullBar, this.hullLabel, this.scoreLabel, this.scoreText, this.comboText, this.waveText, this.banner, this.subBanner, this.hint, this.netText]);
   }
 
@@ -299,7 +320,7 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  // ============================================================ Session-Steuerung
+  // ============================================================ Session control
 
   startSession(session: Session, hooks: SceneHooks) {
     this.session?.dispose();
@@ -314,8 +335,8 @@ export class GameScene extends Phaser.Scene {
       isTouchDevice() && session.mode !== 'local'
         ? ''
         : session.mode === 'local'
-          ? 'P1: WASD + LEERTASTE ankern     P2: PFEILE + ENTER ankern'
-          : 'WASD / PFEILE fliegen     LEERTASTE / SHIFT ankern',
+          ? 'P1: WASD + SPACE to anchor     P2: ARROWS + ENTER to anchor'
+          : 'WASD / ARROWS to fly     SPACE / SHIFT to anchor',
     );
     touch.setVisible(isTouchDevice() && session.mode !== 'local');
     this.netText.setText('');
@@ -350,7 +371,7 @@ export class GameScene extends Phaser.Scene {
     if (this.demo) s.update(delta, this.demoInputs());
     else if (s.mode === 'local') s.update(delta, [this.readKeys(this.keysP1), this.readKeys(this.keysP2)]);
     else {
-      // Tastatur und Touch kombinieren
+      // combine keyboard and touch
       const k = this.readKeys(this.keysAny);
       const t = touch.read();
       s.update(delta, [{ x: Phaser.Math.Clamp(k.x + t.x, -1, 1), y: Phaser.Math.Clamp(k.y + t.y, -1, 1), anchor: k.anchor || t.anchor }]);
@@ -368,13 +389,20 @@ export class GameScene extends Phaser.Scene {
     this.gTether.clear();
     this.drawPlanets(v);
     this.drawAsteroids(v);
+    this.gFx.clear();
+    this.entities.draw(v);
     this.drawTether(v);
     this.drawShips(v);
     this.drawHud(v, delta);
 
     if (!this.demo && v.phase === 'over' && !this.overShown) {
       this.overShown = true;
-      this.time.delayedCall(1400, () => this.hooks?.onGameOver(v.score, v.wave));
+      this.time.delayedCall(1400, () => { if (this.lastView?.phase === 'over') this.hooks?.onGameOver(v.score, v.wave); });
+    } else if (!this.demo && v.phase !== 'over' && this.overShown) {
+      // the other player restarted the game
+      this.overShown = false;
+      this.shownScore = 0;
+      this.hooks?.onRestarted();
     }
   }
 
@@ -387,7 +415,7 @@ export class GameScene extends Phaser.Scene {
     };
   }
 
-  /** Menü-Demo: Schiff 0 ankert grob mittig, Schiff 1 schwingt drumherum */
+  /** Menu demo: ship 0 anchors roughly in the middle, ship 1 swings around it */
   private demoInputs(): PlayerInput[] {
     const v = this.lastView;
     if (!v) return [{ x: 0, y: 0, anchor: true }, { x: 0, y: 0, anchor: false }];
@@ -396,7 +424,7 @@ export class GameScene extends Phaser.Scene {
     const dy = b.y - a.y;
     const d = Math.hypot(dx, dy) || 1;
     if (!v.linked) return [{ x: dx / d, y: dy / d, anchor: false }, { x: -dx / d, y: -dy / d, anchor: false }];
-    // Ankerpunkt: freie Stelle weg von Planeten
+    // anchor point: a free spot away from planets
     let tx = C.WORLD_W / 2;
     let ty = C.WORLD_H / 2;
     for (const p of v.planets) {
@@ -412,7 +440,7 @@ export class GameScene extends Phaser.Scene {
     ];
   }
 
-  // ============================================================ Zeichnen
+  // ============================================================ Drawing
 
   private drawBackground(v: ViewState) {
     const mx = (v.ships[0].x + v.ships[1].x) / 2 - C.WORLD_W / 2;
@@ -440,7 +468,7 @@ export class GameScene extends Phaser.Scene {
       const col = PLANET_ATMO_TINT[p.kind];
       if (!gfx) {
         const glow = this.add.image(p.x, p.y, 'glow').setTint(col).setBlendMode(Phaser.BlendModes.ADD);
-        // Gravitationswellen + Slingshot-Zone als fertige Texturen (statt jeden Frame Kreise zu berechnen)
+        // gravity ripples + slingshot zone as ready-made textures (instead of computing circles every frame)
         const ripples = [0, 1, 2].map(() => this.add.image(p.x, p.y, 'thinring').setTint(col).setBlendMode(Phaser.BlendModes.ADD));
         const zone = this.add.image(p.x, p.y, 'dashring').setTint(BOOST_COLOR).setBlendMode(Phaser.BlendModes.ADD);
         const img = this.add.image(p.x, p.y, `planet${p.kind}`);
@@ -457,7 +485,7 @@ export class GameScene extends Phaser.Scene {
       gfx.img.setScale(R / (PLANET_DIAM / 2)).setAlpha(Phaser.Math.Clamp(p.grow * 2, 0, 1));
       gfx.glow.setScale((R * 4.2) / 128).setAlpha(0.22 * grow);
 
-      // Ringe fließen nach innen
+      // rings flow inwards
       const range = R * 3.4;
       gfx.ripples.forEach((r, i) => {
         const ph = (t * 0.25 + i / 3) % 1;
@@ -496,7 +524,7 @@ export class GameScene extends Phaser.Scene {
 
       const onScreen = ast.x > -ast.r && ast.x < C.WORLD_W + ast.r && ast.y > -ast.r && ast.y < C.WORLD_H + ast.r;
       if (!onScreen) {
-        // Warnpfeil am Rand
+        // warning arrow at the edge
         const ex = Phaser.Math.Clamp(ast.x, 34, C.WORLD_W - 34);
         const ey = Phaser.Math.Clamp(ast.y, 34, C.WORLD_H - 34);
         const ang = Math.atan2(ast.y - ey, ast.x - ex);
@@ -529,7 +557,7 @@ export class GameScene extends Phaser.Scene {
 
     if (!v.linked) {
       if (v.phase === 'over') return;
-      // gestrichelte Hilfslinie + Reichweite fürs Neuverbinden
+      // dashed guide line towards reconnecting
       const near = Phaser.Math.Clamp(1 - (d - C.ROPE_RELINK_DIST) / 600, 0.15, 1);
       const n = Math.floor(d / 16);
       g.lineStyle(2, 0x8899cc, 0.4 * near);
@@ -541,7 +569,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    // Durchhang, wenn das Seil locker ist (sanfte Welle)
+    // sag when the tether is slack (gentle wave)
     const slack = Math.max(0, C.ROPE_LENGTH - d);
     const sag = Math.sqrt(slack * C.ROPE_LENGTH) * 0.22 * Math.sin(t * 2.2);
     const N = this.prof.tetherSegments;
@@ -557,7 +585,7 @@ export class GameScene extends Phaser.Scene {
     const boosted = v.ships[0].boost || v.ships[1].boost;
     for (let i = 0; i < N; i++) {
       const u = (i + 0.5) / N;
-      // Farbverlauf: Farbe Spieler 1 -> hell -> Farbe Spieler 2, bei Spannung Richtung Rot
+      // gradient: player 1 colour -> bright -> player 2 colour, towards red under tension
       let col = u < 0.5 ? lerpColor(SHIP_COLORS[0], 0xe8f6ff, u * 2) : lerpColor(0xe8f6ff, SHIP_COLORS[1], (u - 0.5) * 2);
       if (boosted) col = lerpColor(col, BOOST_COLOR, 0.6);
       col = lerpColor(col, HOT_COLOR, tension * tension);
@@ -568,7 +596,7 @@ export class GameScene extends Phaser.Scene {
       g.lineStyle(2.2, lerpColor(col, 0xffffff, 0.7), 0.95 * flicker).lineBetween(p0.x, p0.y, p1.x, p1.y);
     }
 
-    // Energieimpulse laufen von beiden Seiten zur Mitte
+    // energy pulses run from both ends to the middle
     for (let k = 0; k < 3; k++) {
       const ph = (t * 0.9 + k / 3) % 1;
       for (const side of [0, 1]) {
@@ -597,21 +625,21 @@ export class GameScene extends Phaser.Scene {
       gfx.body.setPosition(s.x, s.y).setRotation(s.angle).setAlpha(blink ? 0.35 : 1);
       gfx.glow.setPosition(s.x, s.y).setTint(col).setScale(s.boost ? 1.1 : 0.75).setAlpha(s.boost ? 0.75 : 0.5);
 
-      // Flamme hinter dem Schiff
+      // flame behind the ship
       const rearX = s.x - cos * 19;
       const rearY = s.y - sin * 19;
       const thrusting = s.thrust && v.phase !== 'over';
       const len = thrusting ? (s.boost ? 0.75 : 0.45) + Math.random() * 0.15 : 0.12 + Math.random() * 0.04;
       gfx.flame.setPosition(rearX, rearY).setRotation(s.angle).setTint(col).setScale(len, thrusting ? 0.4 : 0.25).setAlpha(thrusting ? 1 : 0.6);
 
-      // Partikelmenge abhängig von der Qualitätsstufe
+      // particle count depends on the quality level
       const n = this.trailCount(i);
       if (thrusting && n) this.trails[i].emitParticleAt(rearX, rearY, n);
       if (s.boost && n) this.boostTrail.emitParticleAt(rearX, rearY, n);
 
       gfx.shield.setVisible(s.invuln).setPosition(s.x, s.y).setAlpha(0.5 + Math.sin(t / 60) * 0.3);
 
-      // Anker: rotierende Klammern
+      // anchor: rotating brackets
       if (s.anchor && v.phase !== 'over') {
         const R = 30 + Math.sin(t / 110) * 2;
         const rot = t / 400;
@@ -626,7 +654,7 @@ export class GameScene extends Phaser.Scene {
       }
     });
 
-    // Markierung für das eigene Schiff (online)
+    // marker for your own ship (online)
     const me = this.session?.me ?? -1;
     if (!this.demo && me >= 0 && v.phase !== 'over') {
       const s = v.ships[me];
@@ -635,7 +663,7 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  /** liefert 0..2 Partikel pro Frame, im Mittel 2 * Qualitätsfaktor */
+  /** returns 0..2 particles per frame, on average 2 * quality factor */
   private trailCount(i: number): number {
     if (i === 0) this.trailAcc += 2 * this.prof.particles;
     const n = Math.floor(this.trailAcc);
@@ -646,9 +674,10 @@ export class GameScene extends Phaser.Scene {
   private drawHud(v: ViewState, delta: number) {
     const show = !this.demo;
     for (const o of [this.scoreText, this.scoreLabel, this.comboText, this.waveText, this.hullLabel, this.hullBar]) o.setVisible(show);
+    this.drawBossBar(show ? v.boss : null);
     if (!show) return;
 
-    // Hüllenanzeige in Segmenten – nur neu zeichnen, wenn sich etwas ändert
+    // segmented hull display — only redrawn when something changes
     const frac = v.hull / C.HULL_MAX;
     const blink = frac <= 0.25 && Math.floor(this.time.now / 250) % 2 === 0;
     const key = v.hull * 2 + (blink ? 1 : 0);
@@ -667,13 +696,30 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // Punkte zählen hoch statt zu springen
+    // score counts up instead of jumping
     this.shownScore += (v.score - this.shownScore) * Math.min(1, delta / 120);
     if (Math.abs(v.score - this.shownScore) < 1) this.shownScore = v.score;
-    // setText rendert die Text-Textur neu – deshalb nur bei Änderung
-    setTextIfChanged(this.scoreText, Math.round(this.shownScore).toLocaleString('de-DE'));
-    setTextIfChanged(this.comboText, v.combo > 1 ? `KOMBO ×${v.combo}` : '');
-    setTextIfChanged(this.waveText, v.wave > 0 ? `WELLE ${v.wave}` : '');
+    // setText re-renders the text texture — so only on change
+    setTextIfChanged(this.scoreText, Math.round(this.shownScore).toLocaleString('en-US'));
+    setTextIfChanged(this.comboText, v.combo > 1 ? `COMBO ×${v.combo}` : '');
+    setTextIfChanged(this.waveText, v.wave > 0 ? `WAVE ${v.wave}` : '');
+  }
+
+  private drawBossBar(b: ViewState['boss']) {
+    const visible = !!b && b.state !== 'dying';
+    this.bossLabel.setVisible(visible);
+    const key = visible ? `${Math.ceil(b!.hp)}|${b!.state}` : '';
+    if (key === this.bossKey) return;
+    this.bossKey = key;
+    this.bossBar.clear();
+    if (!visible) return;
+    const w = 520;
+    const x = C.WORLD_W / 2 - w / 2;
+    const y = 78;
+    const frac = Math.max(0, b!.hp / b!.maxHp);
+    this.bossBar.fillStyle(0xffffff, 0.08).fillRoundedRect(x, y, w, 10, 5);
+    this.bossBar.fillStyle(b!.state === 'stunned' ? 0xffe680 : 0x3fd6ff, 0.95).fillRoundedRect(x, y, Math.max(10, w * frac), 10, 5);
+    this.bossBar.lineStyle(1, 0x9ff7ff, 0.4).strokeRoundedRect(x, y, w, 10, 5);
   }
 
   // ============================================================ Events (Juice)
@@ -705,7 +751,7 @@ export class GameScene extends Phaser.Scene {
       case 'snap':
         this.burst(e.x, e.y, 0xff7070, 30);
         this.shockwave(e.x, e.y, 70, 0xff7070);
-        if (play) { sfx.snap(); this.cameras.main.shake(140, 0.008); this.showBanner('SEIL GERISSEN', 'Fliegt zusammen, um neu zu verbinden', 1100, '#ff8a8a', 46); }
+        if (play) { sfx.snap(); this.cameras.main.shake(140, 0.008); this.showBanner('TETHER SNAPPED', 'Fly close together to reconnect', 1100, '#ff8a8a', 46); }
         break;
       case 'link':
         this.burst(e.x, e.y, 0xaaf0ff, 18);
@@ -715,7 +761,7 @@ export class GameScene extends Phaser.Scene {
       case 'sling':
         this.shockwave(e.x, e.y, 70, BOOST_COLOR);
         this.embers.explode(18, e.x, e.y);
-        // beide Schiffe lösen oft gleichzeitig aus: nur einmal anzeigen
+        // both ships often trigger at the same time: show it only once
         if (play && this.time.now - this.lastSlingPop > 500) {
           this.lastSlingPop = this.time.now;
           sfx.sling();
@@ -729,9 +775,69 @@ export class GameScene extends Phaser.Scene {
         if (play) { sfx.impact(); this.cameras.main.shake(120, 0.004); }
         break;
       case 'wave':
-        if (play) {
+        if (!play) break;
+        if (e.boss) {
+          sfx.bossWave();
+          this.showBanner('LEVIATHAN', 'Squeeze it with the taut tether — orbit it together to wrap it up!', 2600, '#9ff7ff');
+        } else {
           sfx.wave();
-          this.showBanner(`WELLE ${e.n}`, e.n === 1 ? 'Fliegt schnell an Planeten vorbei für SLINGSHOT-Boost' : '', 1600);
+          const tips: Record<number, string> = {
+            1: 'Fly fast past planets for a SLINGSHOT boost',
+            2: 'Drones incoming — your tether blocks their shots',
+            3: 'Jellyfish split when sliced — and they sting',
+          };
+          this.showBanner(`WAVE ${e.n}`, tips[e.n] ?? '', 1800);
+        }
+        break;
+      case 'enemyKill':
+        if (e.kind === 'drone') {
+          this.burst(e.x, e.y, 0xff3b5c, 26);
+          this.shockwave(e.x, e.y, 60, 0xff3b5c);
+          this.embers.explode(Math.round(10 * this.prof.particles), e.x, e.y);
+        } else {
+          this.burst(e.x, e.y, 0xd2b0ff, 20);
+          this.shockwave(e.x, e.y, 50, 0xb48cff);
+        }
+        if (play) {
+          if (e.kind === 'drone') sfx.droneDown();
+          else sfx.jellyPop();
+          this.cameras.main.shake(80, 0.004);
+          this.popText(e.x, e.y, `+${e.pts}`, '#ffd166');
+        }
+        break;
+      case 'shoot':
+        if (play) sfx.shoot();
+        break;
+      case 'block':
+        this.burst(e.x, e.y, 0xffe0e6, 8);
+        if (play) sfx.block();
+        break;
+      case 'bossCharge':
+        if (play) { sfx.bossCharge(); this.cameras.main.shake(300, 0.006); }
+        break;
+      case 'wrap':
+        this.shockwave(e.x, e.y, 220, 0xffc94a);
+        this.embers.explode(40, e.x, e.y);
+        if (play) {
+          sfx.wrap();
+          this.cameras.main.shake(250, 0.01);
+          this.showBanner('WRAPPED!', `+${e.pts} · Leviathan is stunned — squeeze it now!`, 1400, '#ffc94a', 60);
+        }
+        break;
+      case 'bossDown':
+        for (let i = 0; i < 6; i++) {
+          this.time.delayedCall(i * 220, () => {
+            const ox = e.x + (Math.random() - 0.5) * 160;
+            const oy = e.y + (Math.random() - 0.5) * 100;
+            this.burst(ox, oy, 0x9ff7ff, 30);
+            this.shockwave(ox, oy, 140, 0x3fd6ff);
+            this.embers.explode(20, ox, oy);
+          });
+        }
+        if (play) {
+          sfx.bossDown();
+          this.cameras.main.shake(900, 0.012);
+          this.showBanner('LEVIATHAN DEFEATED', `+${e.pts}`, 2400, '#9ff7ff', 56);
         }
         break;
       case 'over':

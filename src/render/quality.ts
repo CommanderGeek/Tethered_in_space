@@ -1,5 +1,5 @@
-// Grafik-Qualitätsstufen. "auto" startet passend zum Gerät und schaltet
-// automatisch herunter, wenn die Bildrate dauerhaft einbricht.
+// Graphics quality levels. "auto" starts at a level that suits the device and
+// steps down automatically when the frame rate keeps dropping.
 
 export type QualityLevel = 'high' | 'medium' | 'low';
 export type QualitySetting = 'auto' | QualityLevel;
@@ -7,17 +7,17 @@ export type QualitySetting = 'auto' | QualityLevel;
 export interface QualityProfile {
   bloom: boolean;
   vignette: boolean;
-  /** Vordergrund-Staub und funkelnde Sterne */
+  /** foreground dust and twinkling stars */
   extraBackground: boolean;
-  /** Multiplikator für Partikelmengen */
+  /** multiplier for particle counts */
   particles: number;
-  /** Segmente des Seils (weniger = günstiger) */
+  /** tether segments (fewer = cheaper) */
   tetherSegments: number;
-  /** breiter, weicher Glow ums Seil */
+  /** wide soft glow around the tether */
   tetherGlow: boolean;
-  /** Gravitationswellen + Atmosphären-Glow um Planeten */
+  /** gravity ripples + atmosphere glow around planets */
   planetFx: boolean;
-  /** bewegte Sternebene (Parallaxe) */
+  /** moving star layer (parallax) */
   parallaxStars: boolean;
 }
 
@@ -39,7 +39,7 @@ function loadSetting(): QualitySetting {
   try {
     const s = localStorage.getItem(STORAGE_KEY);
     if (s && ['auto', 'high', 'medium', 'low'].includes(s)) return s as QualitySetting;
-  } catch { /* privater Modus o.ä. */ }
+  } catch { /* private mode etc. */ }
   return 'auto';
 }
 
@@ -67,18 +67,18 @@ class QualityManager {
     this.listeners.push(cb);
   }
 
-  /** Reihum: auto -> hoch -> mittel -> niedrig -> auto */
+  /** cycles: auto -> high -> medium -> low -> auto */
   cycle(): QualitySetting {
     const all: QualitySetting[] = ['auto', 'high', 'medium', 'low'];
     this.setting = all[(all.indexOf(this.setting) + 1) % all.length];
-    try { localStorage.setItem(STORAGE_KEY, this.setting); } catch { /* egal */ }
+    try { localStorage.setItem(STORAGE_KEY, this.setting); } catch { /* ignore */ }
     this.apply(this.setting === 'auto' ? (isTouchDevice() ? 'medium' : 'high') : this.setting);
     return this.setting;
   }
 
-  /** Jeden Frame aufrufen. Senkt im Auto-Modus die Stufe bei dauerhaft < 45 FPS. */
+  /** Call every frame. In auto mode, steps down when FPS stay below 45. */
   tick(deltaMs: number, now: number) {
-    if (deltaMs <= 0 || deltaMs > 500) return; // Tab war im Hintergrund
+    if (deltaMs <= 0 || deltaMs > 500) return; // tab was in the background
     this.fpsAvg += (1000 / deltaMs - this.fpsAvg) * 0.05;
     if (this.setting !== 'auto') return;
 
@@ -109,7 +109,7 @@ export const quality = new QualityManager();
 
 export const QUALITY_LABELS: Record<QualitySetting, string> = {
   auto: 'Auto',
-  high: 'Hoch',
-  medium: 'Mittel',
-  low: 'Niedrig',
+  high: 'High',
+  medium: 'Medium',
+  low: 'Low',
 };

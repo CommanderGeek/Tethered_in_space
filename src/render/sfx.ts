@@ -1,4 +1,4 @@
-// Mini-Synth mit WebAudio – kein einziges Audio-Asset nötig.
+// Tiny WebAudio synth — no audio assets needed.
 
 let ctx: AudioContext | undefined;
 let master: GainNode | undefined;
@@ -75,5 +75,20 @@ export const sfx = {
   },
   impact() { tone('sine', 90, 30, 0.5, 0.7); noise(0.5, 0.5, 500); },
   planet() { tone('sine', 60, 120, 1.2, 0.35); tone('triangle', 220, 330, 1.0, 0.08, 0.2); },
+  shoot() { tone('square', 900, 300, 0.12, 0.06); },
+  block() { tone('triangle', 1400, 2200, 0.08, 0.12); },
+  droneDown() { tone('sawtooth', 600, 80, 0.3, 0.15); noise(0.25, 0.4, 2500); },
+  jellyPop() { tone('sine', 500, 900, 0.1, 0.25); tone('sine', 250, 120, 0.2, 0.2, 0.04); },
+  bossWave() { tone('sawtooth', 55, 50, 1.6, 0.25); tone('sine', 110, 82, 1.6, 0.25, 0.2); },
+  bossCharge() { tone('sawtooth', 70, 160, 0.7, 0.3); noise(0.6, 0.3, 400); },
+  wrap() {
+    [0, 0.08, 0.16, 0.24].forEach((d, i) => tone('triangle', 330 * [1, 1.25, 1.5, 2][i], 330 * [1, 1.25, 1.5, 2][i], 0.4, 0.2, d));
+    noise(0.4, 0.3, 3000);
+  },
+  bossDown() {
+    tone('sine', 120, 25, 1.8, 0.8);
+    noise(1.5, 0.7, 700);
+    [0.3, 0.45, 0.6].forEach((d, i) => tone('triangle', 440 * [1, 1.25, 1.5][i], 440 * [1, 1.25, 1.5][i], 0.6, 0.2, d));
+  },
   over() { [0, 0.18, 0.36].forEach((d, i) => tone('triangle', 330 / [1, 1.19, 1.5][i], 330 / [1, 1.19, 1.5][i] * 0.98, 0.4, 0.25, d)); },
 };

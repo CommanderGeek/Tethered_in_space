@@ -1,17 +1,18 @@
-import type { PlayerInput } from '../sim/sim';
+import type { PlayerInput } from '../sim/types';
 import type { Snapshot } from '../sim/snapshot';
 
 export type Msg =
   | { t: 'hello'; v: number }
   | { t: 'welcome'; v: number }
   | { t: 'reject'; reason: string }
-  | { t: 'input'; i: PlayerInput }
+  /** sent by the client every tick; seq lets the host acknowledge it for prediction */
+  | { t: 'input'; i: PlayerInput; seq: number }
   | { t: 'snap'; s: Snapshot }
   | { t: 'restart' }
   | { t: 'ping'; at: number }
   | { t: 'pong'; at: number };
 
-/** Eine bestehende Verbindung zum anderen Spieler – egal welcher Transport. */
+/** An established connection to the other player — regardless of transport. */
 export interface Link {
   send(msg: Msg): void;
   onMessage(cb: (msg: Msg) => void): void;
@@ -19,7 +20,7 @@ export interface Link {
   close(): void;
 }
 
-/** Ohne 0/O/1/I/L – lässt sich gut vorlesen */
+/** No 0/O/1/I/L — easy to read out loud */
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
 export function randomRoomCode(len = 5): string {

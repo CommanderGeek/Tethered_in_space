@@ -25,7 +25,7 @@ html, body {
 }
 
 #game { position: fixed; inset: 0; }
-/* Vignette als CSS-Overlay statt Shader */
+/* vignette as a CSS overlay instead of a shader */
 body.vignette #game::after {
   content: '';
   position: absolute;
@@ -168,7 +168,7 @@ button.ghost { background: transparent; color: var(--muted); }
 #menu-btn { display: none; }
 body.playing #menu-btn { display: inline-block; }
 #mute.off { text-decoration: line-through; opacity: 0.35; }
-/* im Spiel nur dezent */
+/* subtle while playing */
 body.playing #toolbar { opacity: 0.35; }
 body.playing #toolbar:hover { opacity: 1; }
 
@@ -178,7 +178,7 @@ body.playing #toolbar:hover { opacity: 1; }
   pointer-events: none;
 }
 
-/* ---------------------------------------------------------- Handy */
+/* ---------------------------------------------------------- Phone */
 
 .touch-only { display: none; }
 body.touch .touch-only { display: inline; }
@@ -188,7 +188,7 @@ body.touch .desktop-only { display: none; }
 
 .overlay { overflow-y: auto; }
 
-/* niedrige Höhe (Handy quer): Menü kompakter */
+/* low height (phone in landscape): more compact menu */
 @media (max-height: 520px) {
   .overlay { place-items: start center; padding: 10px 16px 56px; }
   .panel { padding: 16px 20px; }
@@ -204,7 +204,7 @@ body.touch .desktop-only { display: none; }
   #version { display: none; }
 }
 
-/* Touch-Steuerung */
+/* touch controls */
 #touch {
   position: fixed;
   inset: 0;
@@ -260,7 +260,7 @@ body.touch .desktop-only { display: none; }
   transform: scale(0.94);
 }
 
-/* Hochformat-Hinweis während des Spiels */
+/* portrait hint during play */
 #rotate {
   position: fixed;
   inset: 0;
@@ -280,9 +280,58 @@ body.touch .desktop-only { display: none; }
   body.playing.touch #rotate { display: flex; }
 }
 
-/* Eingabefelder brauchen Textauswahl (sonst kann iOS nicht tippen) */
+/* inputs need text selection (otherwise iOS can't type) */
 input { -webkit-user-select: text; user-select: text; touch-action: manipulation; }
 
-/* im Spiel auf dem Handy: Toolbar kompakt, damit sie nicht im Weg ist */
+/* on phones during play: compact toolbar so it isn't in the way */
 body.playing.touch #quality,
 body.playing.touch #fullscreen { display: none; }
+
+/* ---------------------------------------------------------- Highscores */
+
+.new-score { color: #ffd166; font-weight: 600; }
+.score-row { display: flex; gap: 8px; margin: 8px 0 4px; }
+#team-name {
+  flex: 1;
+  min-width: 0;
+  font: 600 16px Inter, system-ui, sans-serif;
+  padding: 11px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  outline: none;
+}
+#team-name:focus { border-color: var(--cyan); }
+
+.score-list {
+  list-style: none;
+  counter-reset: rank;
+  margin: 8px 0 16px;
+  padding: 0;
+  text-align: left;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.score-list li {
+  counter-increment: rank;
+  display: grid;
+  grid-template-columns: 2em 1fr auto;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  padding: 8px 4px;
+  border-bottom: 1px solid rgba(140, 160, 255, 0.1);
+}
+.score-list li::before {
+  content: counter(rank);
+  grid-row: span 2;
+  align-self: center;
+  font: 700 16px Orbitron, sans-serif;
+  color: var(--muted);
+}
+.score-list li:nth-child(1)::before { color: #ffd166; }
+.score-list li:nth-child(2)::before { color: #d6dcff; }
+.score-list li:nth-child(3)::before { color: #e0a070; }
+.score-list .team { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.score-list .meta { grid-column: 2; font-size: 12px; color: var(--muted); }
+.score-list .score { grid-row: 1 / span 2; grid-column: 3; align-self: center; font: 700 18px Orbitron, sans-serif; }

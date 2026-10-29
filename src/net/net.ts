@@ -1,18 +1,17 @@
-// Verbindungsaufbau. Standard: WebRTC über PeerJS (funktioniert zwischen
-// zwei verschiedenen GitHub-Pages-URLs). Für die Entwicklung gibt es mit
-// ?local im URL einen BroadcastChannel-Transport: zwei Tabs im selben
-// Browser, kein Internet nötig.
+// Connection setup. Default: WebRTC via PeerJS (works between two different
+// GitHub Pages URLs). For development, ?local in the URL switches to a
+// BroadcastChannel transport: two windows in the same browser, no internet needed.
 
 import Peer, { type DataConnection } from 'peerjs';
 import { PROTOCOL_VERSION } from '../sim/constants';
 import { type Link, type Msg, randomRoomCode } from './protocol';
 
-/** Präfix, damit sich unsere IDs auf dem öffentlichen PeerJS-Server nicht mit anderen beißen. */
+/** Prefix so our IDs don't clash with others on the public PeerJS server. */
 const PEER_PREFIX = 'tethered-in-space-';
 
 export interface HostedRoom {
   code: string;
-  /** Wartet auf den Mitspieler; resolved nach erfolgreichem Handshake. */
+  /** Waits for the other player; resolves after a successful handshake. */
   guest: Promise<Link>;
   cancel(): void;
 }
@@ -29,17 +28,17 @@ export function joinRoom(code: string): Promise<Link> {
 
 // ------------------------------------------------------------- Handshake
 
-/** Host-Seite: erster Nachricht muss ein passendes hello sein. */
+/** Host side: the first message must be a matching hello. */
 function acceptHandshake(link: Link, timeoutMs = 8000): Promise<Link> {
   return new Promise((resolve, reject) => {
-    const timer = timeoutMs ? setTimeout(() => reject(new Error('Handshake-Timeout')), timeoutMs) : undefined;
+    const timer = timeoutMs ? setTimeout(() => reject(new Error('Handshake timed out')), timeoutMs) : undefined;
     link.onMessage((m) => {
       if (m.t !== 'hello') return;
       clearTimeout(timer);
       if (m.v !== PROTOCOL_VERSION) {
-        link.send({ t: 'reject', reason: `Version passt nicht (Host v${PROTOCOL_VERSION}, du v${m.v}). Beide Seiten neu laden / updaten.` });
+        link.send({ t: 'reject', reason: `Version mismatch (host v${PROTOCOL_VERSION}, you v${m.v}). Reload / update both sides.` });
         setTimeout(() => link.close(), 300);
-        reject(new Error('Versionskonflikt'));
+        reject(new Error('Version mismatch'));
         return;
       }
       link.send({ t: 'welcome', v: PROTOCOL_VERSION });
@@ -48,10 +47,10 @@ function acceptHandshake(link: Link, timeoutMs = 8000): Promise<Link> {
   });
 }
 
-/** Client-Seite */
+/** Client side */
 function doHandshake(link: Link): Promise<Link> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Keine Antwort vom Host')), 8000);
+    const timer = setTimeout(() => reject(new Error('No answer from the host')), 8000);
     link.onMessage((m) => {
       if (m.t === 'welcome') { clearTimeout(timer); resolve(link); }
       if (m.t === 'reject') { clearTimeout(timer); link.close(); reject(new Error(m.reason)); }
@@ -75,7 +74,7 @@ function wrapConnection(conn: DataConnection, onDispose: () => void): Link {
   conn.on('data', (d) => msgCb(d as Msg));
   conn.on('close', fireClose);
   conn.on('error', fireClose);
-  // ICE-Verbindung bricht weg (z.B. Tab zu, WLAN weg) – 'close' kommt da nicht immer
+  // the ICE connection drops (tab closed, Wi-Fi gone) — 'close' doesn't always fire then
   conn.peerConnection?.addEventListener('iceconnectionstatechange', () => {
     const s = conn.peerConnection?.iceConnectionState;
     if (s === 'failed' || s === 'closed') fireClose();
@@ -90,11 +89,11 @@ function wrapConnection(conn: DataConnection, onDispose: () => void): Link {
 
 function peerErrorText(err: { type?: string; message?: string }): string {
   switch (err.type) {
-    case 'peer-unavailable': return 'Raum nicht gefunden. Code richtig?';
+    case 'peer-unavailable': return 'Room not found. Is the code correct?';
     case 'network':
     case 'server-error':
-    case 'socket-error': return 'Signaling-Server nicht erreichbar (Internet/Firewall?).';
-    case 'browser-incompatible': return 'Dein Browser unterstützt kein WebRTC.';
+    case 'socket-error': return 'Signaling server unreachable (internet/firewall?).';
+    case 'browser-incompatible': return 'Your browser doesn\'t support WebRTC.';
     default: return err.message ?? String(err.type ?? err);
   }
 }
@@ -119,7 +118,7 @@ async function hostPeer(): Promise<HostedRoom> {
       if (err.type !== 'unavailable-id') throw new Error(peerErrorText(err));
     }
   }
-  if (!peer) throw new Error('Konnte keinen Raum erstellen.');
+  if (!peer) throw new Error('Could not create a room.');
   const p = peer;
 
   let cancelled = false;
@@ -132,10 +131,10 @@ async function hostPeer(): Promise<HostedRoom> {
           const ok = await acceptHandshake(link);
           accepted = true;
           resolve(ok);
-          // Nach dem ersten Spieler keine weiteren annehmen
+          // accept no further players after the first one
           p.disconnect();
         } catch (e) {
-          // falscher Client (z.B. alte Version) – weiter auf den nächsten warten
+          // wrong client (e.g. old version) — keep waiting for the next one
           console.warn(e);
         }
       });
@@ -155,21 +154,21 @@ async function joinPeer(code: string): Promise<Link> {
   }
   const link = await new Promise<Link>((resolve, reject) => {
     const conn = peer.connect(PEER_PREFIX + code, { reliable: true, serialization: 'json' });
-    const timer = setTimeout(() => { peer.destroy(); reject(new Error('Verbindung dauert zu lange (NAT/Firewall?).')); }, 15000);
+    const timer = setTimeout(() => { peer.destroy(); reject(new Error('Connection is taking too long (NAT/firewall?).')); }, 15000);
     conn.on('open', () => { clearTimeout(timer); resolve(wrapConnection(conn, () => peer.destroy())); });
     peer.on('error', (e) => { clearTimeout(timer); peer.destroy(); reject(new Error(peerErrorText(e))); });
   });
   return doHandshake(link);
 }
 
-// ------------------------------------------------------------- BroadcastChannel (Dev)
+// ------------------------------------------------------------- BroadcastChannel (dev)
 
 function channelLink(room: string, me: 'host' | 'guest'): Link {
   const ch = new BroadcastChannel('tethered-' + room);
   const other = me === 'host' ? 'guest' : 'host';
   let msgCb: (m: Msg) => void = () => {};
   let closeCb: () => void = () => {};
-  let lastSeen = 0; // 0 = Gegenseite noch nie gehört
+  let lastSeen = 0; // 0 = never heard from the other side
   let closed = false;
   const fireClose = (why = '?') => {
     if (closed) return;
@@ -186,8 +185,8 @@ function channelLink(room: string, me: 'host' | 'guest'): Link {
     if (m === 'bye') fireClose('bye');
     else if (m !== 'hb') msgCb(m);
   };
-  // Heartbeat, um geschlossene Tabs zu erkennen. Großzügig, weil Browser
-  // Timer in Hintergrund-Tabs drosseln.
+  // Heartbeat to detect closed tabs. Generous, because browsers throttle
+  // timers in background tabs.
   const hb = setInterval(() => {
     ch.postMessage({ from: me, m: 'hb' });
     if (lastSeen && performance.now() - lastSeen > 10000) fireClose('timeout');
