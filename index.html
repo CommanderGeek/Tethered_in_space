@@ -2,7 +2,11 @@
 <html lang="de">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#04050d" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Tethered</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><line x1='7' y1='22' x2='25' y2='10' stroke='%23aaf0ff' stroke-width='2'/><circle cx='7' cy='22' r='5' fill='%233ef3ff'/><circle cx='25' cy='10' r='5' fill='%23ff4fd8'/></svg>" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -20,13 +24,13 @@
         <div class="buttons">
           <button data-action="host" class="primary">Raum erstellen</button>
           <button data-action="show-join">Raum beitreten</button>
-          <button data-action="local" class="ghost">Lokal zu zweit (eine Tastatur)</button>
+          <button data-action="local" class="ghost desktop-only">Lokal zu zweit (eine Tastatur)</button>
         </div>
         <details class="howto">
           <summary>Wie spielt man?</summary>
           <ul>
-            <li><b>Fliegen:</b> WASD oder Pfeiltasten</li>
-            <li><b>Ankern:</b> Leertaste/Shift. Du wirst schwer und bremst, dein Partner schwingt um dich herum.</li>
+            <li><b>Fliegen:</b> WASD oder Pfeiltasten <span class="touch-only">(Handy: linke Bildschirmhälfte wischen)</span></li>
+            <li><b>Ankern:</b> Leertaste/Shift <span class="touch-only">(Handy: ⚓-Knopf rechts)</span>. Du wirst schwer und bremst, dein Partner schwingt um dich herum.</li>
             <li><b>Schneiden:</b> Zieht das Seil <i>schnell</i> durch Asteroiden. Langsam prallen sie nur ab.</li>
             <li><b>Slingshot:</b> Fliegt schnell dicht an einem Planeten vorbei (goldener Ring). Dann bekommt ihr kurz mehr Tempo und doppelte Punkte.</li>
             <li><b>Planeten</b> ziehen euch und die Asteroiden an. Ein harter Aufprall kostet Hülle.</li>
@@ -78,7 +82,25 @@
       </section>
     </div>
 
-    <button id="mute" title="Ton an/aus (M)">♪</button>
+    <!-- Touch-Steuerung (nur auf Handys im Spiel sichtbar) -->
+    <div id="touch">
+      <div class="stick-zone"></div>
+      <div class="stick-base"><div class="stick-knob"></div></div>
+      <button class="anchor-btn" aria-label="Ankern">⚓</button>
+    </div>
+
+    <!-- Hinweis: Handy drehen -->
+    <div id="rotate">
+      <div class="rotate-icon">📱</div>
+      <p>Dreh dein Handy ins Querformat</p>
+    </div>
+
+    <div id="toolbar">
+      <button id="fullscreen" title="Vollbild">⛶</button>
+      <button id="quality" title="Grafikqualität">Grafik: Auto</button>
+      <button id="mute" title="Ton an/aus (M)">♪</button>
+      <button id="menu-btn" title="Zurück zum Menü (Esc)">Menü</button>
+    </div>
     <footer id="version"></footer>
 
     <script type="module" src="/src/main.ts"></script>

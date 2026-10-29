@@ -5,6 +5,8 @@ import type { ViewPlanet, ViewState } from '../sim/snapshot';
 import { Session } from '../session';
 import { sfx } from '../render/sfx';
 import { ASTEROID_RADIUS_IN_TEX, ASTEROID_VARIANTS, PLANET_DIAM, createTextures } from '../render/textures';
+import { quality, isTouchDevice, type QualityProfile } from '../render/quality';
+import { touch } from '../input/touch';
 
 export const SHIP_COLORS = [0x3ef3ff, 0xff4fd8] as const;
 const BOOST_COLOR = 0xffc94a;
@@ -29,12 +31,25 @@ interface ShipGfx {
   shield: Phaser.GameObjects.Image;
 }
 
+/** Farbmischung ohne Objekt-Allokation (läuft viele Male pro Frame) */
 const lerpColor = (a: number, b: number, t: number) => {
-  const c = Phaser.Display.Color.Interpolate.ColorWithColor(
-    Phaser.Display.Color.ValueToColor(a), Phaser.Display.Color.ValueToColor(b), 1000, Math.round(Phaser.Math.Clamp(t, 0, 1) * 1000),
-  );
-  return Phaser.Display.Color.GetColor(c.r, c.g, c.b);
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  const r = ((a >> 16) & 255) + ((((b >> 16) & 255) - ((a >> 16) & 255)) * t);
+  const g = ((a >> 8) & 255) + ((((b >> 8) & 255) - ((a >> 8) & 255)) * t);
+  const bl = (a & 255) + (((b & 255) - (a & 255)) * t);
+  return ((r & 255) << 16) | ((g & 255) << 8) | (bl & 255);
 };
+
+function setTextIfChanged(t: Phaser.GameObjects.Text, value: string) {
+  if (t.text !== value) t.setText(value);
+}
+
+interface PlanetGfx {
+  img: Phaser.GameObjects.Image;
+  glow: Phaser.GameObjects.Image;
+  ripples: Phaser.GameObjects.Image[];
+  zone: Phaser.GameObjects.Image;
+}
 
 export class GameScene extends Phaser.Scene {
   private session?: Session;
@@ -48,15 +63,21 @@ export class GameScene extends Phaser.Scene {
   private worldFront!: Phaser.GameObjects.Layer;
   private hud!: Phaser.GameObjects.Layer;
 
-  private stars: Phaser.GameObjects.TileSprite[] = [];
-  private dust!: Phaser.GameObjects.TileSprite;
+  /** bewegte Sterne/Staub als einzelne kleine Sprites (statt bildschirmfüllender TileSprites) */
+  private stars: { img: Phaser.GameObjects.Image; x: number; y: number }[] = [];
+  private dust: { img: Phaser.GameObjects.Image; x: number; y: number }[] = [];
+  private glints: Phaser.GameObjects.Image[] = [];
+  private fpsText!: Phaser.GameObjects.Text;
+  private showFps = new URLSearchParams(location.search).has('debug');
+  private prof: QualityProfile = quality.profile;
+  private trailAcc = 0;
   private gBack!: Phaser.GameObjects.Graphics; // Gravitationsfelder, Warnpfeile
   private gTether!: Phaser.GameObjects.Graphics; // additiv
   private gFront!: Phaser.GameObjects.Graphics; // Anker-Ringe, Markierungen
 
   private shipGfx: ShipGfx[] = [];
   private asteroidImgs = new Map<number, Phaser.GameObjects.Image>();
-  private planetImgs = new Map<string, { img: Phaser.GameObjects.Image; glow: Phaser.GameObjects.Image }>();
+  private planetImgs = new Map<string, PlanetGfx>();
 
   private sparks!: Phaser.GameObjects.Particles.ParticleEmitter;
   private debris!: Phaser.GameObjects.Particles.ParticleEmitter;
@@ -82,6 +103,7 @@ export class GameScene extends Phaser.Scene {
   private overShown = false;
   private shownScore = 0;
   private lastSlingPop = 0;
+  private hullKey = -1;
 
   constructor() {
     super('game');
@@ -101,12 +123,9 @@ export class GameScene extends Phaser.Scene {
     const ui = this.cameras.add(0, 0, C.WORLD_W, C.WORLD_H);
     this.cameras.main.ignore(this.hud);
     ui.ignore([this.bg, this.worldBack, this.worldMid, this.worldFront]);
-    if (this.renderer.type === Phaser.WEBGL) {
-      this.cameras.main.postFX.addBloom(0xffffff, 1, 1, 1, 1.1, 4);
-      this.cameras.main.postFX.addVignette(0.5, 0.5, 0.92, 0.32);
-    }
-
     this.makeBackground();
+    this.applyQuality(quality.profile);
+    quality.onChange((p) => this.applyQuality(p));
 
     this.gBack = this.add.graphics();
     this.gTether = this.add.graphics().setBlendMode(Phaser.BlendModes.ADD);
@@ -127,12 +146,44 @@ export class GameScene extends Phaser.Scene {
     this.startDemo();
   }
 
+  /** Effekte je nach Qualitätsstufe an-/ausschalten */
+  private applyQuality(p: QualityProfile) {
+    this.prof = p;
+    const cam = this.cameras.main;
+    if (this.renderer.type === Phaser.WEBGL) {
+      cam.postFX.clear();
+      // Bloom ist der mit Abstand teuerste Effekt (mehrere Weichzeichner-Durchgänge übers ganze Bild)
+      if (p.bloom) cam.postFX.addBloom(0xffffff, 1, 1, 1, 1.1, 2);
+    }
+    // Vignette per CSS (kostet keinen Shader-Durchgang)
+    document.body.classList.toggle('vignette', p.vignette);
+    for (const s of this.stars) s.img.setVisible(p.parallaxStars);
+    for (const d of this.dust) d.img.setVisible(p.extraBackground);
+    for (const gfx of this.planetImgs.values()) {
+      gfx.glow.setVisible(p.planetFx);
+      for (const r of gfx.ripples) r.setVisible(p.planetFx);
+    }
+    for (const g of this.glints) g.setVisible(p.extraBackground);
+  }
+
   private makeBackground() {
-    this.bg.add(this.add.image(0, 0, 'nebula').setOrigin(0));
-    this.stars = ['stars0', 'stars1', 'stars2'].map((k) =>
-      this.add.tileSprite(0, 0, C.WORLD_W, C.WORLD_H, k).setOrigin(0),
-    );
-    this.bg.add(this.stars);
+    // Nebel + feste Sterne + Rand liegen als CSS-Hintergrund hinter dem (transparenten) Canvas.
+    // Der Browser-Compositor zeichnet das praktisch umsonst – spart ein bildschirmfüllendes Bild pro Frame.
+    const neb = this.textures.get('nebula').getSourceImage() as HTMLCanvasElement;
+    neb.toBlob((blob) => {
+      if (!blob) return;
+      const c = this.game.canvas;
+      c.style.backgroundImage = `url(${URL.createObjectURL(blob)})`;
+      c.style.backgroundSize = '100% 100%';
+    });
+    for (let i = 0; i < 50; i++) {
+      const img = this.add.image(0, 0, 'dot')
+        .setScale(0.08 + Math.random() * 0.1)
+        .setTint([0xffffff, 0xcfe6ff, 0xffe9d6, 0xd9d0ff][i % 4])
+        .setAlpha(0.6 + Math.random() * 0.4);
+      this.stars.push({ img, x: Math.random() * C.WORLD_W, y: Math.random() * C.WORLD_H });
+      this.bg.add(img);
+    }
 
     // funkelnde Sterne
     for (let i = 0; i < 22; i++) {
@@ -142,6 +193,7 @@ export class GameScene extends Phaser.Scene {
         .setTint([0xffffff, 0xcfe6ff, 0xffe2c4, 0xd9d0ff][i % 4])
         .setAlpha(0.2);
       this.bg.add(s);
+      this.glints.push(s);
       this.tweens.add({
         targets: s, alpha: { from: 0.15, to: 0.85 }, scale: s.scale * 1.25,
         duration: 900 + Math.random() * 2200, yoyo: true, repeat: -1, delay: Math.random() * 3000, ease: 'Sine.InOut',
@@ -149,17 +201,15 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Arena-Rand: weicher Energiezaun
-    const border = this.add.graphics();
-    const m = C.WALL_MARGIN;
-    border.lineStyle(6, 0x6a7cff, 0.05).strokeRoundedRect(m, m, C.WORLD_W - 2 * m, C.WORLD_H - 2 * m, 22);
-    border.lineStyle(1.5, 0x8fa0ff, 0.22).strokeRoundedRect(m, m, C.WORLD_W - 2 * m, C.WORLD_H - 2 * m, 22);
-    this.bg.add(border);
 
-    this.dust = this.add.tileSprite(0, 0, C.WORLD_W, C.WORLD_H, 'dust').setOrigin(0).setAlpha(0.7);
-    this.bg.add(this.dust);
+    for (let i = 0; i < 16; i++) {
+      const img = this.add.image(0, 0, 'dot').setScale(0.25 + Math.random() * 0.35).setTint(0xb4c8ff).setAlpha(0.18);
+      this.dust.push({ img, x: Math.random() * C.WORLD_W, y: Math.random() * C.WORLD_H });
+      this.bg.add(img);
+    }
 
     // gelegentliche Sternschnuppen
-    this.time.addEvent({ delay: 3500, loop: true, callback: () => { if (Math.random() < 0.55) this.shootingStar(); } });
+    this.time.addEvent({ delay: 3500, loop: true, callback: () => { if (this.prof.extraBackground && Math.random() < 0.55) this.shootingStar(); } });
   }
 
   private shootingStar() {
@@ -227,6 +277,8 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5).setAlpha(0).setLetterSpacing(4);
     this.hint = this.add.text(40, C.WORLD_H - 36, '', { fontFamily: font, fontSize: '14px', color: '#7f89c4' }).setOrigin(0, 1);
     this.netText = this.add.text(C.WORLD_W - 40, C.WORLD_H - 36, '', { fontFamily: font, fontSize: '13px', color: '#5d6596' }).setOrigin(1, 1);
+    this.fpsText = this.add.text(C.WORLD_W / 2, C.WORLD_H - 36, '', { fontFamily: 'monospace', fontSize: '14px', color: '#9fffb0' }).setOrigin(0.5, 1);
+    this.hud.add(this.fpsText);
     this.hud.add([this.hullBar, this.hullLabel, this.scoreLabel, this.scoreText, this.comboText, this.waveText, this.banner, this.subBanner, this.hint, this.netText]);
   }
 
@@ -243,6 +295,7 @@ export class GameScene extends Phaser.Scene {
     };
     kb.on('keydown', (e: KeyboardEvent) => {
       if (!(e.target instanceof HTMLInputElement)) e.preventDefault();
+      if (e.key === 'F3' || e.key === 'f') this.showFps = !this.showFps;
     });
   }
 
@@ -258,10 +311,13 @@ export class GameScene extends Phaser.Scene {
     session.onEvent((e) => this.handleEvent(e));
     session.onDisconnect(() => this.hooks?.onDisconnect());
     this.hint.setText(
-      session.mode === 'local'
-        ? 'P1: WASD + LEERTASTE ankern     P2: PFEILE + ENTER ankern'
-        : 'WASD / PFEILE fliegen     LEERTASTE / SHIFT ankern',
+      isTouchDevice() && session.mode !== 'local'
+        ? ''
+        : session.mode === 'local'
+          ? 'P1: WASD + LEERTASTE ankern     P2: PFEILE + ENTER ankern'
+          : 'WASD / PFEILE fliegen     LEERTASTE / SHIFT ankern',
     );
+    touch.setVisible(isTouchDevice() && session.mode !== 'local');
     this.netText.setText('');
   }
 
@@ -271,6 +327,7 @@ export class GameScene extends Phaser.Scene {
     this.session.onEvent((e) => this.handleEvent(e, true));
     this.demo = true;
     this.hooks = undefined;
+    touch.setVisible(false);
     this.hint.setText('');
     this.netText.setText('');
   }
@@ -286,12 +343,18 @@ export class GameScene extends Phaser.Scene {
   update(_time: number, delta: number) {
     const s = this.session;
     if (!s) return;
+    quality.tick(delta, this.time.now);
+    if (this.showFps) setTextIfChanged(this.fpsText, `${Math.round(quality.fps)} FPS · ${quality.level}${quality.setting === 'auto' ? ' (auto)' : ''}`);
+    this.fpsText.setVisible(this.showFps);
 
     if (this.demo) s.update(delta, this.demoInputs());
     else if (s.mode === 'local') s.update(delta, [this.readKeys(this.keysP1), this.readKeys(this.keysP2)]);
     else {
-      s.update(delta, [this.readKeys(this.keysAny)]);
-      this.netText.setText(s.rtt ? `PING ${Math.round(s.rtt)} ms` : '');
+      // Tastatur und Touch kombinieren
+      const k = this.readKeys(this.keysAny);
+      const t = touch.read();
+      s.update(delta, [{ x: Phaser.Math.Clamp(k.x + t.x, -1, 1), y: Phaser.Math.Clamp(k.y + t.y, -1, 1), anchor: k.anchor || t.anchor }]);
+      setTextIfChanged(this.netText, s.rtt ? `PING ${Math.round(s.rtt)} ms` : '');
     }
 
     const v = s.view();
@@ -355,62 +418,57 @@ export class GameScene extends Phaser.Scene {
     const mx = (v.ships[0].x + v.ships[1].x) / 2 - C.WORLD_W / 2;
     const my = (v.ships[0].y + v.ships[1].y) / 2 - C.WORLD_H / 2;
     const t = this.time.now;
-    this.stars.forEach((s, i) => {
-      const f = (i + 1) * 0.025;
-      s.tilePositionX = mx * f + t * 0.003 * (i + 1);
-      s.tilePositionY = my * f;
-    });
-    this.dust.tilePositionX = mx * 0.18 + t * 0.02;
-    this.dust.tilePositionY = my * 0.18 + t * 0.006;
+    if (!this.prof.parallaxStars) return;
+    const wrap = (v: number, m: number) => ((v % m) + m) % m;
+    for (const s of this.stars) {
+      s.img.setPosition(wrap(s.x - mx * 0.06 - t * 0.008, C.WORLD_W), wrap(s.y - my * 0.06, C.WORLD_H));
+    }
+    if (!this.prof.extraBackground) return;
+    for (const d of this.dust) {
+      d.img.setPosition(wrap(d.x - mx * 0.18 - t * 0.02, C.WORLD_W), wrap(d.y - my * 0.18 - t * 0.006, C.WORLD_H));
+    }
   }
 
   private drawPlanets(v: ViewState) {
     const seen = new Set<string>();
-    const g = this.gBack;
     const t = this.time.now / 1000;
 
     for (const p of v.planets) {
       const key = `${p.x},${p.y},${p.kind}`;
       seen.add(key);
       let gfx = this.planetImgs.get(key);
+      const col = PLANET_ATMO_TINT[p.kind];
       if (!gfx) {
-        const glow = this.add.image(p.x, p.y, 'glow').setTint(PLANET_ATMO_TINT[p.kind]).setBlendMode(Phaser.BlendModes.ADD);
+        const glow = this.add.image(p.x, p.y, 'glow').setTint(col).setBlendMode(Phaser.BlendModes.ADD);
+        // Gravitationswellen + Slingshot-Zone als fertige Texturen (statt jeden Frame Kreise zu berechnen)
+        const ripples = [0, 1, 2].map(() => this.add.image(p.x, p.y, 'thinring').setTint(col).setBlendMode(Phaser.BlendModes.ADD));
+        const zone = this.add.image(p.x, p.y, 'dashring').setTint(BOOST_COLOR).setBlendMode(Phaser.BlendModes.ADD);
         const img = this.add.image(p.x, p.y, `planet${p.kind}`);
-        this.worldBack.add([glow, img]);
+        this.worldBack.add([glow, ...ripples, zone, img]);
         this.worldBack.bringToTop(this.gBack);
-        gfx = { img, glow };
+        gfx = { img, glow, ripples, zone };
+        glow.setVisible(this.prof.planetFx);
+        for (const r of ripples) r.setVisible(this.prof.planetFx);
         this.planetImgs.set(key, gfx);
         if (p.grow < 0.5) this.planetSpawnFx(p);
       }
       const R = planetRadius(p);
+      const grow = Phaser.Math.Clamp(p.grow, 0, 1);
       gfx.img.setScale(R / (PLANET_DIAM / 2)).setAlpha(Phaser.Math.Clamp(p.grow * 2, 0, 1));
-      gfx.glow.setScale((R * 4.2) / 128).setAlpha(0.22 * Phaser.Math.Clamp(p.grow, 0, 1));
+      gfx.glow.setScale((R * 4.2) / 128).setAlpha(0.22 * grow);
 
-      if (R < 4) continue;
-      // Gravitationsfeld: Ringe, die nach innen fließen
-      const col = PLANET_ATMO_TINT[p.kind];
+      // Ringe fließen nach innen
       const range = R * 3.4;
-      for (let i = 0; i < 4; i++) {
-        const ph = (t * 0.25 + i / 4) % 1;
+      gfx.ripples.forEach((r, i) => {
+        const ph = (t * 0.25 + i / 3) % 1;
         const rr = range - ph * (range - R * 1.1);
-        const a = Math.sin(ph * Math.PI) * 0.09 * p.grow;
-        g.lineStyle(1.5, col, a).strokeCircle(p.x, p.y, rr);
-      }
-      // Slingshot-Zone
-      const zone = p.r * C.SLING_ZONE;
-      const segs = 48;
-      const a0 = t * 0.15;
-      g.lineStyle(2, BOOST_COLOR, 0.16 * Phaser.Math.Clamp(p.grow, 0, 1));
-      for (let i = 0; i < segs; i += 2) {
-        g.beginPath();
-        g.arc(p.x, p.y, zone, a0 + (i / segs) * Math.PI * 2, a0 + ((i + 1) / segs) * Math.PI * 2);
-        g.strokePath();
-      }
+        r.setScale(rr / 124).setAlpha(Math.sin(ph * Math.PI) * 0.12 * grow);
+      });
+      gfx.zone.setScale((p.r * C.SLING_ZONE) / 250).setRotation(t * 0.15).setAlpha(0.2 * grow);
     }
     for (const [key, gfx] of this.planetImgs) {
       if (!seen.has(key)) {
-        gfx.img.destroy();
-        gfx.glow.destroy();
+        for (const o of [gfx.img, gfx.glow, gfx.zone, ...gfx.ripples]) o.destroy();
         this.planetImgs.delete(key);
       }
     }
@@ -486,7 +544,7 @@ export class GameScene extends Phaser.Scene {
     // Durchhang, wenn das Seil locker ist (sanfte Welle)
     const slack = Math.max(0, C.ROPE_LENGTH - d);
     const sag = Math.sqrt(slack * C.ROPE_LENGTH) * 0.22 * Math.sin(t * 2.2);
-    const N = 28;
+    const N = this.prof.tetherSegments;
     const pts: { x: number; y: number }[] = [];
     for (let i = 0; i <= N; i++) {
       const u = i / N;
@@ -505,7 +563,7 @@ export class GameScene extends Phaser.Scene {
       col = lerpColor(col, HOT_COLOR, tension * tension);
       const p0 = pts[i];
       const p1 = pts[i + 1];
-      g.lineStyle(16, col, 0.07 * flicker).lineBetween(p0.x, p0.y, p1.x, p1.y);
+      if (this.prof.tetherGlow) g.lineStyle(16, col, 0.07 * flicker).lineBetween(p0.x, p0.y, p1.x, p1.y);
       g.lineStyle(7, col, 0.25 * flicker).lineBetween(p0.x, p0.y, p1.x, p1.y);
       g.lineStyle(2.2, lerpColor(col, 0xffffff, 0.7), 0.95 * flicker).lineBetween(p0.x, p0.y, p1.x, p1.y);
     }
@@ -546,8 +604,10 @@ export class GameScene extends Phaser.Scene {
       const len = thrusting ? (s.boost ? 0.75 : 0.45) + Math.random() * 0.15 : 0.12 + Math.random() * 0.04;
       gfx.flame.setPosition(rearX, rearY).setRotation(s.angle).setTint(col).setScale(len, thrusting ? 0.4 : 0.25).setAlpha(thrusting ? 1 : 0.6);
 
-      if (thrusting) this.trails[i].emitParticleAt(rearX, rearY, 2);
-      if (s.boost) this.boostTrail.emitParticleAt(rearX, rearY, 2);
+      // Partikelmenge abhängig von der Qualitätsstufe
+      const n = this.trailCount(i);
+      if (thrusting && n) this.trails[i].emitParticleAt(rearX, rearY, n);
+      if (s.boost && n) this.boostTrail.emitParticleAt(rearX, rearY, n);
 
       gfx.shield.setVisible(s.invuln).setPosition(s.x, s.y).setAlpha(0.5 + Math.sin(t / 60) * 0.3);
 
@@ -575,34 +635,45 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /** liefert 0..2 Partikel pro Frame, im Mittel 2 * Qualitätsfaktor */
+  private trailCount(i: number): number {
+    if (i === 0) this.trailAcc += 2 * this.prof.particles;
+    const n = Math.floor(this.trailAcc);
+    if (i === 1) this.trailAcc -= n;
+    return n;
+  }
+
   private drawHud(v: ViewState, delta: number) {
     const show = !this.demo;
-    this.hullBar.clear();
-    for (const o of [this.scoreText, this.scoreLabel, this.comboText, this.waveText, this.hullLabel]) o.setVisible(show);
+    for (const o of [this.scoreText, this.scoreLabel, this.comboText, this.waveText, this.hullLabel, this.hullBar]) o.setVisible(show);
     if (!show) return;
 
-    // Hüllenanzeige in Segmenten
-    const segs = 10;
-    const w = 26;
-    const gap = 4;
+    // Hüllenanzeige in Segmenten – nur neu zeichnen, wenn sich etwas ändert
     const frac = v.hull / C.HULL_MAX;
-    const col = frac > 0.5 ? 0x3ef3a0 : frac > 0.25 ? 0xffd166 : 0xff4f4f;
-    for (let i = 0; i < segs; i++) {
-      const fill = Phaser.Math.Clamp(frac * segs - i, 0, 1);
-      const x = 40 + i * (w + gap);
-      this.hullBar.fillStyle(0xffffff, 0.07).fillRoundedRect(x, 44, w, 12, 3);
-      if (fill > 0) {
-        const low = frac <= 0.25 && Math.floor(this.time.now / 250) % 2 === 0;
-        this.hullBar.fillStyle(col, low ? 0.45 : 0.95).fillRoundedRect(x, 44, w * fill, 12, 3);
+    const blink = frac <= 0.25 && Math.floor(this.time.now / 250) % 2 === 0;
+    const key = v.hull * 2 + (blink ? 1 : 0);
+    if (key !== this.hullKey) {
+      this.hullKey = key;
+      this.hullBar.clear();
+      const segs = 10;
+      const w = 26;
+      const gap = 4;
+      const col = frac > 0.5 ? 0x3ef3a0 : frac > 0.25 ? 0xffd166 : 0xff4f4f;
+      for (let i = 0; i < segs; i++) {
+        const fill = Phaser.Math.Clamp(frac * segs - i, 0, 1);
+        const x = 40 + i * (w + gap);
+        this.hullBar.fillStyle(0xffffff, 0.07).fillRoundedRect(x, 44, w, 12, 3);
+        if (fill > 0) this.hullBar.fillStyle(col, blink ? 0.45 : 0.95).fillRoundedRect(x, 44, w * fill, 12, 3);
       }
     }
 
     // Punkte zählen hoch statt zu springen
     this.shownScore += (v.score - this.shownScore) * Math.min(1, delta / 120);
     if (Math.abs(v.score - this.shownScore) < 1) this.shownScore = v.score;
-    this.scoreText.setText(Math.round(this.shownScore).toLocaleString('de-DE'));
-    this.comboText.setText(v.combo > 1 ? `KOMBO ×${v.combo}` : '');
-    this.waveText.setText(v.wave > 0 ? `WELLE ${v.wave}` : '');
+    // setText rendert die Text-Textur neu – deshalb nur bei Änderung
+    setTextIfChanged(this.scoreText, Math.round(this.shownScore).toLocaleString('de-DE'));
+    setTextIfChanged(this.comboText, v.combo > 1 ? `KOMBO ×${v.combo}` : '');
+    setTextIfChanged(this.waveText, v.wave > 0 ? `WELLE ${v.wave}` : '');
   }
 
   // ============================================================ Events (Juice)
@@ -613,8 +684,8 @@ export class GameScene extends Phaser.Scene {
       case 'cut': {
         this.burst(e.x, e.y, e.split ? 0xcfd8ff : 0xffffff, e.split ? 16 : 28);
         this.shockwave(e.x, e.y, e.r * 1.8, 0xb9c8ff);
-        this.debris.explode(Math.round(e.r / 2.5), e.x, e.y);
-        if (!e.split) this.embers.explode(14, e.x, e.y);
+        this.debris.explode(Math.round((e.r / 2.5) * this.prof.particles), e.x, e.y);
+        if (!e.split) this.embers.explode(Math.round(14 * this.prof.particles), e.x, e.y);
         if (play) {
           if (e.split) sfx.cut(this.lastView?.combo ?? 1);
           else sfx.shatter();
@@ -671,7 +742,7 @@ export class GameScene extends Phaser.Scene {
 
   private burst(x: number, y: number, tint: number, n: number) {
     this.sparks.setParticleTint(tint);
-    this.sparks.explode(n, x, y);
+    this.sparks.explode(Math.max(4, Math.round(n * this.prof.particles)), x, y);
     const flash = this.add.image(x, y, 'glow').setTint(tint).setBlendMode(Phaser.BlendModes.ADD).setScale(0.6);
     this.worldFront.add(flash);
     this.tweens.add({ targets: flash, scale: 1.6, alpha: 0, duration: 260, ease: 'Quad.Out', onComplete: () => flash.destroy() });

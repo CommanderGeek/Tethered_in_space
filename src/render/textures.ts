@@ -2,7 +2,7 @@
 // Lichtquelle für alle Objekte: oben links (passend zur Sonne im Hintergrund).
 
 import Phaser from 'phaser';
-import { WORLD_H, WORLD_W } from '../sim/constants';
+import { WALL_MARGIN, WORLD_H, WORLD_W } from '../sim/constants';
 
 export const SHIP_TEX_SIZE = 128;
 export const PLANET_TEX = 512; // Canvas-Größe
@@ -69,6 +69,25 @@ function softDots(scene: Phaser.Scene) {
     g.addColorStop(1, 'rgba(255,255,255,0)');
     c.fillStyle = g;
     c.fillRect(0, 0, 128, 128);
+  });
+
+  // dünner Ring für Gravitationswellen (wird skaliert statt jeden Frame gezeichnet)
+  canvas(scene, 'thinring', 256, 256, (c) => {
+    c.strokeStyle = 'rgba(255,255,255,1)';
+    c.lineWidth = 3;
+    c.beginPath();
+    c.arc(128, 128, 124, 0, Math.PI * 2);
+    c.stroke();
+  });
+
+  // gestrichelter Ring für die Slingshot-Zone
+  canvas(scene, 'dashring', 512, 512, (c) => {
+    c.strokeStyle = 'rgba(255,255,255,1)';
+    c.lineWidth = 4;
+    c.setLineDash([14, 14]);
+    c.beginPath();
+    c.arc(256, 256, 250, 0, Math.PI * 2);
+    c.stroke();
   });
 
   canvas(scene, 'shard', 12, 10, (c) => {
@@ -511,6 +530,18 @@ function backgroundTextures(scene: Phaser.Scene) {
     }
     c.restore();
 
+    // statische Sterne direkt in den Hintergrund backen (spart zwei bildschirmfüllende Ebenen)
+    c.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 700; i++) {
+      const big = i % 7 === 0;
+      c.globalAlpha = (big ? 0.8 : 0.45) * (0.35 + rnd() * 0.65);
+      c.fillStyle = ['#ffffff', '#cfe6ff', '#ffe9d6', '#d9d0ff', '#bfefff'][i % 5];
+      c.beginPath();
+      c.arc(rnd() * W, rnd() * H, (big ? 1.3 : 0.8) * (0.6 + rnd() * 0.7), 0, Math.PI * 2);
+      c.fill();
+    }
+    c.globalAlpha = 1;
+
     // Sonne oben links (teilweise außerhalb)
     const sun = c.createRadialGradient(-60, -80, 0, -60, -80, 520);
     sun.addColorStop(0, 'rgba(255,240,210,0.55)');
@@ -520,36 +551,17 @@ function backgroundTextures(scene: Phaser.Scene) {
     c.fillStyle = sun;
     c.fillRect(0, 0, W, H);
     c.globalCompositeOperation = 'source-over';
-  });
 
-  const layers = [
-    { key: 'stars0', n: 380, size: 0.8, alpha: 0.5 },
-    { key: 'stars1', n: 120, size: 1.3, alpha: 0.75 },
-    { key: 'stars2', n: 35, size: 2, alpha: 1 },
-  ];
-  for (const l of layers) {
-    canvas(scene, l.key, 512, 512, (c) => {
-      for (let i = 0; i < l.n; i++) {
-        c.globalAlpha = l.alpha * (0.35 + rnd() * 0.65);
-        c.fillStyle = ['#ffffff', '#cfe6ff', '#ffe9d6', '#d9d0ff', '#bfefff'][i % 5];
-        c.beginPath();
-        c.arc(rnd() * 512, rnd() * 512, l.size * (0.6 + rnd() * 0.7), 0, Math.PI * 2);
-        c.fill();
-      }
-    });
-  }
-
-  // Vordergrund-Staub (weich, unscharf)
-  canvas(scene, 'dust', 512, 512, (c) => {
-    for (let i = 0; i < 18; i++) {
-      const x = rnd() * 512;
-      const y = rnd() * 512;
-      const r = 2 + rnd() * 5;
-      const g = c.createRadialGradient(x, y, 0, x, y, r);
-      g.addColorStop(0, 'rgba(180,200,255,0.35)');
-      g.addColorStop(1, 'rgba(180,200,255,0)');
-      c.fillStyle = g;
-      c.fillRect(x - r, y - r, 2 * r, 2 * r);
-    }
+    // Arena-Rand (statisch, daher direkt ins Hintergrundbild)
+    const m = WALL_MARGIN;
+    const rr = (lw: number, style: string) => {
+      c.lineWidth = lw;
+      c.strokeStyle = style;
+      c.beginPath();
+      c.roundRect(m, m, W - 2 * m, H - 2 * m, 22);
+      c.stroke();
+    };
+    rr(6, 'rgba(106,124,255,0.06)');
+    rr(1.5, 'rgba(143,160,255,0.24)');
   });
 }

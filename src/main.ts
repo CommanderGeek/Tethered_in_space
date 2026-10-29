@@ -6,6 +6,8 @@ import { Session } from './session';
 import { hostRoom, joinRoom, type HostedRoom } from './net/net';
 import { normalizeCode } from './net/protocol';
 import { toggleMute, unlockAudio } from './render/sfx';
+import { isTouchDevice, quality, QUALITY_LABELS } from './render/quality';
+import { touch } from './input/touch';
 
 // ------------------------------------------------------------ Phaser
 
@@ -24,10 +26,14 @@ async function boot() {
     parent: 'game',
     width: C.WORLD_W,
     height: C.WORLD_H,
-    backgroundColor: '#04050d',
+    // transparent: der Hintergrund (Nebel) liegt per CSS hinter dem Canvas
+    transparent: true,
     scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
     scene,
-    render: { antialias: true },
+    render: { antialias: true, powerPreference: 'high-performance' },
+    // eigene Touch-Steuerung im DOM, Phaser braucht kein Multi-Touch
+    input: { activePointers: 1 },
+    fps: { smoothStep: true },
   });
 }
 void boot();
@@ -45,6 +51,7 @@ let generation = 0;
 
 function show(screen: Screen | null) {
   overlay.classList.toggle('hidden', screen === null);
+  document.body.classList.toggle('playing', screen === null);
   overlay.querySelectorAll<HTMLElement>('[data-screen]').forEach((el) => {
     el.hidden = el.dataset.screen !== screen;
   });
@@ -135,10 +142,20 @@ async function copy(text: string, btn: HTMLElement) {
   }
 }
 
+/** Auf dem Handy: Vollbild + Querformat sperren (geht nur direkt nach einem Tipp) */
+async function goFullscreen() {
+  try {
+    if (!document.fullscreenElement) await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+    const o = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> };
+    await o.lock?.('landscape');
+  } catch { /* iOS Safari kann kein Fullscreen-API – egal */ }
+}
+
 overlay.addEventListener('click', (e) => {
   const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-action]');
   if (!btn) return;
   unlockAudio();
+  if (isTouchDevice() && ['host', 'show-join', 'restart'].includes(btn.dataset.action ?? '')) void goFullscreen();
   switch (btn.dataset.action) {
     case 'host': void host(); break;
     case 'show-join': show('join'); break;
@@ -157,12 +174,37 @@ overlay.addEventListener('click', (e) => {
 $('join-form').addEventListener('submit', (e) => {
   e.preventDefault();
   unlockAudio();
+  if (isTouchDevice()) void goFullscreen();
   void join($<HTMLInputElement>('join-code').value);
 });
 $<HTMLInputElement>('join-code').addEventListener('input', (e) => {
   const el = e.target as HTMLInputElement;
   el.value = normalizeCode(el.value);
 });
+
+// ------------------------------------------------------------ Toolbar, Handy
+
+if (isTouchDevice()) document.body.classList.add('touch');
+touch.mount($('touch'));
+
+const qualityBtn = $('quality');
+const updateQualityLabel = () => {
+  const lvl = quality.setting === 'auto' ? ` (${QUALITY_LABELS[quality.level]})` : '';
+  qualityBtn.textContent = `Grafik: ${QUALITY_LABELS[quality.setting]}${lvl}`;
+};
+updateQualityLabel();
+quality.onChange(updateQualityLabel);
+qualityBtn.addEventListener('click', () => { quality.cycle(); updateQualityLabel(); });
+
+const fsBtn = $('fullscreen');
+if (!document.fullscreenEnabled) fsBtn.hidden = true;
+fsBtn.addEventListener('click', () => {
+  if (document.fullscreenElement) void document.exitFullscreen();
+  else void goFullscreen();
+});
+
+const menuBtn = $('menu-btn');
+menuBtn.addEventListener('click', () => { if (session) backToMenu(); });
 
 const muteBtn = $('mute');
 const flipMute = () => muteBtn.classList.toggle('off', toggleMute());

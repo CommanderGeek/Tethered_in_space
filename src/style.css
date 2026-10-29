@@ -13,6 +13,11 @@
 html, body {
   margin: 0;
   height: 100%;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
   background: var(--bg);
   color: var(--text);
   font-family: Inter, system-ui, sans-serif;
@@ -20,6 +25,14 @@ html, body {
 }
 
 #game { position: fixed; inset: 0; }
+/* Vignette als CSS-Overlay statt Shader */
+body.vignette #game::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.55) 100%);
+}
 #game canvas { display: block; }
 
 .overlay {
@@ -30,6 +43,7 @@ html, body {
   padding: 16px;
   background: radial-gradient(ellipse at center, rgba(4, 5, 13, 0.15), rgba(4, 5, 13, 0.6));
   transition: opacity 0.25s;
+  z-index: 4;
 }
 .overlay.hidden { opacity: 0; pointer-events: none; }
 
@@ -75,7 +89,8 @@ button {
   transition: transform 0.08s, background 0.15s, border-color 0.15s;
 }
 button:hover { background: rgba(255, 255, 255, 0.1); border-color: rgba(160, 180, 255, 0.45); }
-button:active:not(#mute) { transform: scale(0.98); }
+button:active { transform: scale(0.98); }
+#toolbar button:active { transform: none; }
 button.primary {
   border-color: transparent;
   background: linear-gradient(90deg, rgba(62, 243, 255, 0.85), rgba(255, 79, 216, 0.85));
@@ -133,17 +148,141 @@ button.ghost { background: transparent; color: var(--muted); }
 .howto ul { padding-left: 18px; line-height: 1.55; margin: 0; }
 .howto b { color: var(--text); }
 
-#mute {
-  position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%);
-  width: 38px; height: 38px; padding: 0;
-  border-radius: 50%;
-  font-size: 16px;
+#toolbar {
+  position: fixed;
+  left: 50%;
+  bottom: max(10px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  z-index: 5;
+}
+#toolbar button {
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 17px;
+  font-size: 13px;
   opacity: 0.6;
 }
+#toolbar button:hover { opacity: 1; }
+#menu-btn { display: none; }
+body.playing #menu-btn { display: inline-block; }
 #mute.off { text-decoration: line-through; opacity: 0.35; }
+/* im Spiel nur dezent */
+body.playing #toolbar { opacity: 0.35; }
+body.playing #toolbar:hover { opacity: 1; }
 
 #version {
   position: fixed; left: 14px; bottom: 10px;
   font-size: 11px; color: rgba(139, 147, 199, 0.5);
   pointer-events: none;
 }
+
+/* ---------------------------------------------------------- Handy */
+
+.touch-only { display: none; }
+body.touch .touch-only { display: inline; }
+body.touch .desktop-only { display: none; }
+
+#version { bottom: max(10px, env(safe-area-inset-bottom)); }
+
+.overlay { overflow-y: auto; }
+
+/* niedrige Höhe (Handy quer): Menü kompakter */
+@media (max-height: 520px) {
+  .overlay { place-items: start center; padding: 10px 16px 56px; }
+  .panel { padding: 16px 20px; }
+  .logo { font-size: 34px; margin-bottom: 2px; }
+  .tagline { margin-bottom: 12px; font-size: 14px; }
+  .buttons { gap: 8px; margin: 10px 0; }
+  button { padding: 10px 14px; }
+  .code { font-size: 38px; padding: 4px 0 4px 0.25em; }
+  #join-code { font-size: 30px; padding: 8px; }
+  .final-score { font-size: 44px; }
+  h2 { margin-bottom: 6px; }
+  p { margin: 6px 0; }
+  #version { display: none; }
+}
+
+/* Touch-Steuerung */
+#touch {
+  position: fixed;
+  inset: 0;
+  display: none;
+  z-index: 2;
+}
+#touch.visible { display: block; }
+.stick-zone {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 60%;
+  touch-action: none;
+}
+.stick-base {
+  position: absolute;
+  left: 0; top: 0;
+  width: 128px; height: 128px;
+  margin: -64px 0 0 -64px;
+  border-radius: 50%;
+  border: 2px solid rgba(160, 190, 255, 0.35);
+  background: radial-gradient(circle, rgba(62, 243, 255, 0.10), rgba(62, 243, 255, 0.02) 70%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+}
+.stick-base.active { opacity: 1; }
+.stick-knob {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 54px; height: 54px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle at 35% 35%, rgba(255, 255, 255, 0.9), rgba(62, 243, 255, 0.55));
+  box-shadow: 0 0 18px rgba(62, 243, 255, 0.6);
+}
+.anchor-btn {
+  position: absolute;
+  right: max(28px, env(safe-area-inset-right));
+  bottom: max(36px, env(safe-area-inset-bottom));
+  width: 96px; height: 96px;
+  border-radius: 50%;
+  font-size: 38px;
+  padding: 0;
+  border: 2px solid rgba(255, 79, 216, 0.45);
+  background: radial-gradient(circle, rgba(255, 79, 216, 0.2), rgba(255, 79, 216, 0.05));
+  color: #fff;
+  touch-action: none;
+  opacity: 0.8;
+}
+.anchor-btn.pressed {
+  background: radial-gradient(circle, rgba(255, 79, 216, 0.6), rgba(255, 79, 216, 0.2));
+  box-shadow: 0 0 28px rgba(255, 79, 216, 0.6);
+  transform: scale(0.94);
+}
+
+/* Hochformat-Hinweis während des Spiels */
+#rotate {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(4, 5, 13, 0.92);
+  text-align: center;
+  padding: 24px;
+}
+#rotate .rotate-icon { font-size: 56px; animation: tilt 1.8s infinite ease-in-out; }
+@keyframes tilt { 0%, 30% { transform: rotate(0); } 60%, 100% { transform: rotate(-90deg); } }
+@media (orientation: portrait) {
+  body.playing.touch #rotate { display: flex; }
+}
+
+/* Eingabefelder brauchen Textauswahl (sonst kann iOS nicht tippen) */
+input { -webkit-user-select: text; user-select: text; touch-action: manipulation; }
+
+/* im Spiel auf dem Handy: Toolbar kompakt, damit sie nicht im Weg ist */
+body.playing.touch #quality,
+body.playing.touch #fullscreen { display: none; }

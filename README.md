@@ -28,6 +28,7 @@ Then open `http://localhost:5173`.
 
 - **Without internet:** Open `http://localhost:5173/?local` in **two windows side by side** (not tabs). Choose "Raum erstellen" (create room) in one window and join with the code in the other. This uses a `BroadcastChannel` instead of WebRTC.
 - **Real WebRTC:** Same thing without `?local`, but it goes through the public PeerJS server. This is also how you play over the internet.
+- **On your phone:** open the site in landscape. Drag on the left half of the screen to fly (floating joystick), hold the ⚓ button on the right to anchor. Fullscreen and landscape lock kick in automatically when you create or join a room (not supported on iOS Safari).
 - **Two players on one keyboard:** Choose "Lokal zu zweit" in the menu (P1: WASD + Space, P2: arrows + Enter).
 
 In dev mode, the scene is available in the browser console as `__tethered.scene`.
@@ -96,6 +97,21 @@ The **host is authoritative**: only the host runs `sim.ts`, at a fixed 60 Hz tim
 - [ ] **Gamepad support** (Phaser has `this.input.gamepad`)
 - [ ] **Touch controls** for phones
 - [ ] **Highscore list** (e.g. Supabase or Firebase)
+
+## Performance
+
+Rendering is the bottleneck, not game logic (the simulation handles ~20 objects and takes well under 1 ms per frame), so WebAssembly wouldn't help. Instead there are graphics quality levels:
+
+| Level | What's on |
+|---|---|
+| High | everything, incl. bloom (the most expensive effect by far) |
+| Medium | no bloom; parallax stars, dust, planet gravity ripples |
+| Low | no bloom, no extra background/planet effects, fewer particles, simpler tether |
+
+- The **"Grafik"** button at the bottom cycles Auto → High → Medium → Low (saved per browser).
+- **Auto** starts at High on desktop and Medium on phones, and steps down automatically if the frame rate stays below 45 FPS.
+- Force a level via URL: `?quality=low`. Show an FPS counter with **F** / **F3** or `?debug`.
+- The static background (nebula, stars, arena border) and the vignette are CSS behind/over the transparent canvas, so the GPU doesn't redraw them every frame.
 
 ## Known limitations
 
