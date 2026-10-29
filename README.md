@@ -1,104 +1,104 @@
 # TETHERED
 
-Koop-Weltraumspiel für zwei im Browser. Zwei Schiffe hängen an einem Energieseil, und alles, was ihr *schnell genug* mit dem Seil durchzieht, wird zerschnitten.
+A two-player co-op space game in the browser. Two ships are joined by an energy tether, and anything you sweep the tether through *fast enough* gets sliced.
 
-- **Fliegen:** WASD / Pfeiltasten
-- **Ankern:** Leertaste / Shift. Du wirst schwer und bremst, dein Partner schwingt um dich herum.
-- **Schneiden:** Nur mit Schwung. Zu langsam prallen Asteroiden einfach ab.
-- **Seil reißt** bei zu viel Zug (z. B. wenn beide auseinanderziehen). Fliegt wieder nah zusammen, dann verbindet es sich neu.
-- Schnelle Schnitte hintereinander geben Kombo-Punkte.
-- **Planeten** ziehen Schiffe und Asteroiden an und wechseln mit jeder Welle. Fliegt ihr schnell durch den goldenen Ring um einen Planeten, bekommt ihr einen **Slingshot-Boost**: mehr Höchstgeschwindigkeit und doppelte Punkte für Schnitte.
+- **Fly:** WASD / arrow keys
+- **Anchor:** Space / Shift. Your ship gets heavy and brakes hard, so your partner swings around you.
+- **Slice:** Only works with momentum. If the tether moves too slowly, asteroids just bounce off it.
+- **The tether snaps** under too much strain (for example when you both pull apart). Fly close together again to reconnect it.
+- Quick slices in a row build up a combo multiplier.
+- **Planets** pull in ships and asteroids, and the layout changes every wave. Fly fast through the golden ring around a planet to get a **slingshot boost**: higher top speed and double points for slices.
 
-Gespielt wird über einen Raumcode, Peer-to-Peer per WebRTC. Es ist egal, ob ihr auf derselben oder auf zwei verschiedenen GitHub-Pages-URLs seid.
+You connect with a room code, peer-to-peer over WebRTC. It doesn't matter whether you're both on the same GitHub Pages URL or on two different ones.
 
 ---
 
-## Loslegen
+## Getting started
 
-Ihr braucht Node.js ab Version 20.
+You need Node.js 20 or newer.
 
 ```bash
 npm install
 npm run dev
 ```
 
-Danach `http://localhost:5173` öffnen.
+Then open `http://localhost:5173`.
 
-### Multiplayer lokal testen
+### Testing multiplayer locally
 
-- **Ohne Internet:** `http://localhost:5173/?local` in **zwei nebeneinanderliegenden Fenstern** öffnen (nicht als Tabs). Dann im einen Fenster „Raum erstellen“ wählen und im anderen mit dem Code beitreten. Das läuft über einen `BroadcastChannel` statt WebRTC.
-- **Echt über WebRTC:** Ohne `?local` geht es genauso, nur über den öffentlichen PeerJS-Server. So spielt man auch über das Internet.
-- **Lokal zu zweit an einer Tastatur:** Im Menü „Lokal zu zweit“ wählen (P1: WASD + Leertaste, P2: Pfeile + Enter).
+- **Without internet:** Open `http://localhost:5173/?local` in **two windows side by side** (not tabs). Choose "Raum erstellen" (create room) in one window and join with the code in the other. This uses a `BroadcastChannel` instead of WebRTC.
+- **Real WebRTC:** Same thing without `?local`, but it goes through the public PeerJS server. This is also how you play over the internet.
+- **Two players on one keyboard:** Choose "Lokal zu zweit" in the menu (P1: WASD + Space, P2: arrows + Enter).
 
-Im Dev-Modus ist die Szene in der Browser-Konsole unter `__tethered.scene` erreichbar.
-
----
-
-## GitHub Pages einrichten
-
-Das Feature heißt **GitHub Pages**. Die URL ist immer `https://<user-oder-org>.github.io/<repo-name>/`.
-
-1. Repo anlegen und den Code pushen (Branch `main`).
-2. Im Repo **Settings → Pages → Build and deployment → Source: „GitHub Actions“** einstellen.
-3. Fertig. Bei jedem Push auf `main` baut `.github/workflows/deploy.yml` das Spiel und veröffentlicht es. Den Link findet ihr im Tab **Actions** beim jeweiligen Lauf.
-
-### Zwei URLs, ein Spiel
-
-Empfohlenes Setup:
-
-- **Haupt-Repo** (z. B. in einer kleinen GitHub-Organisation oder bei einem von euch), beide als Collaborators. Die Pages-URL davon ist die „offizielle“ Version.
-- **Jeder hat einen Fork** auf dem eigenen Account und damit eine eigene URL, z. B. `elias.github.io/tethered`. Im Fork einmalig **Actions aktivieren** (Tab Actions → „I understand…“) und Pages wie oben auf „GitHub Actions“ stellen.
-- Neue Features baut ihr im Fork oder in einem Branch, testet sie auf eurer eigenen URL und mergt dann per Pull Request ins Haupt-Repo.
-
-**Wichtig:** Damit ihr zusammen spielen könnt, muss auf beiden Seiten dieselbe `PROTOCOL_VERSION` laufen (`src/sim/constants.ts`). Zählt die Version hoch, sobald sich Nachrichten oder Snapshots ändern. Wer eine andere Version hat, bekommt beim Beitreten eine klare Fehlermeldung. Die Version steht unten links im Spiel.
+In dev mode, the scene is available in the browser console as `__tethered.scene`.
 
 ---
 
-## Aufbau
+## Setting up GitHub Pages
+
+The feature is called **GitHub Pages**. The URL is always `https://<user-or-org>.github.io/<repo-name>/`.
+
+1. Create a repo and push the code (branch `main`).
+2. In the repo, go to **Settings → Pages → Build and deployment → Source** and select **"GitHub Actions"**.
+3. That's it. Every push to `main` runs `.github/workflows/deploy.yml`, which builds and publishes the game. You'll find the link in the **Actions** tab for each run.
+
+### Two URLs, one game
+
+Recommended setup:
+
+- **One main repo** (for example in a small GitHub organization, or under one of your accounts) with both of you as collaborators. Its Pages URL is the "official" version.
+- **Each of you has a fork** on your own account, which gives you your own URL, e.g. `elias.github.io/tethered`. In the fork, **enable Actions** once (Actions tab → "I understand…") and set Pages to "GitHub Actions" as above.
+- Build new features in your fork or a branch, test them on your own URL, then merge into the main repo via pull request.
+
+**Important:** To play together, both sides must run the same `PROTOCOL_VERSION` (`src/sim/constants.ts`). Bump the version whenever messages or snapshots change. Anyone on a different version gets a clear error message when joining. The version is shown in the bottom-left corner of the game.
+
+---
+
+## Project structure
 
 ```
 src/
-  main.ts              Einstieg: Phaser starten, Menü/Lobby (DOM-Overlay)
-  session.ts           Klebt Simulation + Netzwerk zusammen (local / host / client)
+  main.ts              Entry point: starts Phaser, menu/lobby (DOM overlay)
+  session.ts           Glues simulation and networking together (local / host / client)
   sim/
-    constants.ts       ALLE Tuning-Werte (Seil, Schiffe, Wellen, Planeten-Layouts …), hier wird das Spielgefühl eingestellt
-    sim.ts             Reine Spiellogik ohne Phaser: Physik, Seil, Schneiden, Wellen, Gravitation
-    snapshot.ts        Netzwerkformat + Interpolation auf dem Client
+    constants.ts       ALL tuning values (tether, ships, waves, planet layouts …) — this is where the game feel lives
+    sim.ts             Pure game logic, no Phaser: physics, tether, slicing, waves, gravity
+    snapshot.ts        Network format + interpolation on the client
   net/
-    protocol.ts        Nachrichtentypen, Raumcodes
-    net.ts             PeerJS (WebRTC) und BroadcastChannel (Dev), Handshake mit Versionscheck
-  scenes/GameScene.ts  Rendering: Sterne, Seil, Asteroiden, Partikel, HUD, Screenshake
-  render/textures.ts   Alle Grafiken prozedural per Canvas (Schiffe, Asteroiden, Planeten, Nebel)
-  render/sfx.ts        Soundeffekte als WebAudio-Synth (keine Assets)
+    protocol.ts        Message types, room codes
+    net.ts             PeerJS (WebRTC) and BroadcastChannel (dev), handshake with version check
+  scenes/GameScene.ts  Rendering: stars, tether, asteroids, particles, HUD, screen shake
+  render/textures.ts   All graphics generated procedurally via canvas (ships, asteroids, planets, nebula)
+  render/sfx.ts        Sound effects as a WebAudio synth (no assets)
 ```
 
-### Netcode in einem Absatz
+### Netcode in one paragraph
 
-Der **Host ist autoritativ**: Nur er führt `sim.ts` aus, mit festem Zeitschritt bei 60 Hz. Er schickt 30-mal pro Sekunde einen kompakten Snapshot an den Client. Der Client schickt nur seine Eingaben (Richtung + Anker) und rendert die Snapshots mit etwa 80 ms Verzögerung, interpoliert zwischen zwei bekannten Zuständen. Das ist simpel und robust und für Koop völlig ausreichend. Weil der Renderer nur einen `ViewState` bekommt, weiß er nicht, ob er Host oder Client ist.
+The **host is authoritative**: only the host runs `sim.ts`, at a fixed 60 Hz timestep. It sends a compact snapshot to the client 30 times per second. The client only sends its inputs (direction + anchor) and renders the snapshots with about 80 ms of delay, interpolating between two known states. It's simple, robust, and plenty for a co-op game. Because the renderer only receives a `ViewState`, it doesn't know whether it's the host or the client.
 
-### Eine neue Mechanik einbauen
+### Adding a new mechanic
 
-1. Den Zustand in `World` ergänzen (`sim.ts`) und in `step()` updaten.
-2. Wenn der Client es sehen muss: Feld zu `Snapshot`/`ViewState` hinzufügen (`snapshot.ts`) und **`PROTOCOL_VERSION` hochzählen**.
-3. Für einmalige Effekte (Explosion, Sound) ein `SimEvent` pushen. Das kommt automatisch bei beiden an.
-4. In `GameScene.ts` zeichnen bzw. in `handleEvent` auf das Event reagieren.
+1. Add the state to `World` (`sim.ts`) and update it in `step()`.
+2. If the client needs to see it: add a field to `Snapshot`/`ViewState` (`snapshot.ts`) and **bump `PROTOCOL_VERSION`**.
+3. For one-off effects (explosion, sound), push a `SimEvent`. It automatically reaches both players.
+4. Draw it in `GameScene.ts`, or react to the event in `handleEvent`.
 
 ---
 
-## Ideen für die nächsten Schritte
+## Ideas for next steps
 
-- [x] **Gravitation:** Planeten mit Slingshot-Boost
-- [ ] **Schwarzes Loch**, das euch auseinanderzieht, und Planetenlayouts, die sich bewegen (Monde im Orbit)
-- [ ] **Schrott + Upgrades** zwischen den Wellen: längeres oder elektrisches Seil, Magnet, Schild
-- [ ] **Gegnertypen:** Drohnen, die das Seil meiden, Weltraumquallen, die sich teilen
-- [ ] **Boss:** ein Weltraumwal, den man mit dem Seil „einwickeln“ muss
-- [ ] **Client-Prediction** fürs eigene Schiff, damit es sich bei hohem Ping direkter anfühlt
-- [ ] **Gamepad-Support** (Phaser hat `this.input.gamepad`)
-- [ ] **Touch-Steuerung** fürs Handy
-- [ ] **Highscore-Liste** (z. B. Supabase oder Firebase)
+- [x] **Gravity:** planets with a slingshot boost
+- [ ] **Black hole** that pulls you apart, and moving planet layouts (moons in orbit)
+- [ ] **Scrap + upgrades** between waves: longer or electric tether, magnet, shield
+- [ ] **Enemy types:** drones that avoid the tether, space jellyfish that split
+- [ ] **Boss:** a space whale you have to "wrap up" with the tether
+- [ ] **Client-side prediction** for your own ship, so it feels more responsive at high ping
+- [ ] **Gamepad support** (Phaser has `this.input.gamepad`)
+- [ ] **Touch controls** for phones
+- [ ] **Highscore list** (e.g. Supabase or Firebase)
 
-## Bekannte Grenzen
+## Known limitations
 
-- In manchen Netzen (Mobilfunk, Uni- oder Firmen-WLAN) klappt die direkte WebRTC-Verbindung nicht. Dann braucht es einen TURN-Server, z. B. den kostenlosen Tier von metered.ca. Den trägt man in `net.ts` bei `new Peer(…, { config: { iceServers: […] } })` ein.
-- Wenn der Host den Tab minimiert oder wechselt, pausiert der Browser das Spiel, und damit pausiert es für beide.
-- Der öffentliche PeerJS-Server ist kostenlos, aber ohne Garantie. Falls er mal ausfällt, kann man einen eigenen `peerjs-server` hosten.
+- On some networks (mobile data, university or corporate Wi-Fi), a direct WebRTC connection won't work. You'll need a TURN server then, e.g. the free tier from metered.ca. Add it in `net.ts` via `new Peer(…, { config: { iceServers: […] } })`.
+- If the host minimizes or switches away from the tab, the browser pauses the game, which pauses it for both players.
+- The public PeerJS server is free but comes with no guarantees. If it ever goes down, you can host your own `peerjs-server`.
