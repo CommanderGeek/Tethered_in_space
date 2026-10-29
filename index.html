@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tethered</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><line x1='7' y1='22' x2='25' y2='10' stroke='%23aaf0ff' stroke-width='2'/><circle cx='7' cy='22' r='5' fill='%233ef3ff'/><circle cx='25' cy='10' r='5' fill='%23ff4fd8'/></svg>" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Inter:wght@400;600&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="game"></div>
+
+    <div id="overlay" class="overlay">
+      <!-- Hauptmenü -->
+      <section class="panel" data-screen="main">
+        <h1 class="logo">TETHERED</h1>
+        <p class="tagline">Zwei Schiffe. Ein Seil. Alles dazwischen wird zerschnitten.</p>
+        <div class="buttons">
+          <button data-action="host" class="primary">Raum erstellen</button>
+          <button data-action="show-join">Raum beitreten</button>
+          <button data-action="local" class="ghost">Lokal zu zweit (eine Tastatur)</button>
+        </div>
+        <details class="howto">
+          <summary>Wie spielt man?</summary>
+          <ul>
+            <li><b>Fliegen:</b> WASD oder Pfeiltasten</li>
+            <li><b>Ankern:</b> Leertaste/Shift. Du wirst schwer und bremst, dein Partner schwingt um dich herum.</li>
+            <li><b>Schneiden:</b> Zieht das Seil <i>schnell</i> durch Asteroiden. Langsam prallen sie nur ab.</li>
+            <li><b>Slingshot:</b> Fliegt schnell dicht an einem Planeten vorbei (goldener Ring). Dann bekommt ihr kurz mehr Tempo und doppelte Punkte.</li>
+            <li><b>Planeten</b> ziehen euch und die Asteroiden an. Ein harter Aufprall kostet Hülle.</li>
+            <li><b>Achtung:</b> Zu viel Zug, dann reißt das Seil. Fliegt wieder nah zusammen, um es neu zu verbinden.</li>
+            <li>Schnelle Schnitte hintereinander geben Kombo-Punkte.</li>
+          </ul>
+        </details>
+      </section>
+
+      <!-- Host wartet -->
+      <section class="panel" data-screen="hosting" hidden>
+        <h2>Raum erstellt</h2>
+        <p>Gib deinem Mitspieler diesen Code:</p>
+        <div class="code" id="room-code">·····</div>
+        <div class="buttons row">
+          <button data-action="copy-code">Code kopieren</button>
+          <button data-action="copy-link">Einladungslink kopieren</button>
+        </div>
+        <p class="status"><span class="pulse"></span> Warte auf Mitspieler …</p>
+        <button data-action="back" class="ghost">Abbrechen</button>
+      </section>
+
+      <!-- Beitreten -->
+      <section class="panel" data-screen="join" hidden>
+        <h2>Raum beitreten</h2>
+        <form id="join-form">
+          <input id="join-code" maxlength="5" autocomplete="off" spellcheck="false" placeholder="CODE" />
+          <button type="submit" class="primary">Verbinden</button>
+        </form>
+        <button data-action="back" class="ghost">Zurück</button>
+      </section>
+
+      <!-- Laden / Fehler / Info -->
+      <section class="panel" data-screen="message" hidden>
+        <h2 id="msg-title"></h2>
+        <p id="msg-text"></p>
+        <button data-action="back" class="ghost" id="msg-back">Zum Menü</button>
+      </section>
+
+      <!-- Game Over -->
+      <section class="panel" data-screen="over" hidden>
+        <h2>Mission beendet</h2>
+        <div class="final-score" id="final-score">0</div>
+        <p id="final-wave"></p>
+        <div class="buttons">
+          <button data-action="restart" class="primary">Nochmal</button>
+          <button data-action="leave" class="ghost">Zum Menü</button>
+        </div>
+      </section>
+    </div>
+
+    <button id="mute" title="Ton an/aus (M)">♪</button>
+    <footer id="version"></footer>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
