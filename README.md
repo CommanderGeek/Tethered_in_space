@@ -38,9 +38,9 @@ In dev mode, the scene is available in the browser console as `__tethered.scene`
 
 The feature is called **GitHub Pages**. The URL is always `https://<user-or-org>.github.io/<repo-name>/`.
 
-1. Create a repo and push the code (branch `main`).
+1. Create a repo and push the code (branch `main` or `master`).
 2. In the repo, go to **Settings → Pages → Build and deployment → Source** and select **"GitHub Actions"**.
-3. That's it. Every push to `main` runs `.github/workflows/deploy.yml`, which builds and publishes the game. You'll find the link in the **Actions** tab for each run.
+3. That's it. Every push to `main` or `master` runs `.github/workflows/deploy.yml`, which builds and publishes the game. You'll find the link in the **Actions** tab for each run.
 
 ### Two URLs, one game
 

@@ -1,10 +1,10 @@
-# Baut das Spiel bei jedem Push auf main und veröffentlicht es auf GitHub Pages.
+# Baut das Spiel bei jedem Push auf main/master und veröffentlicht es auf GitHub Pages.
 # Einmalig nötig: Repo -> Settings -> Pages -> Source: "GitHub Actions"
 name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   workflow_dispatch:
 
 permissions:
